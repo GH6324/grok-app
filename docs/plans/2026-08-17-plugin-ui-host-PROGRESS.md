@@ -11,7 +11,7 @@
 | C | 推荐表多项 | DONE | vitest pluginRecommended+settingsCatalog+i18n；typecheck；pi FLAG 已修 |
 | D | iframe Host + bridge + Provider | DONE | vitest pluginHost+i18n；typecheck；pi PASS after FLAG |
 | E | AppWorkbench 接线 | PENDING | |
-| F | 夹具 + chrome.css / host-client.js | PENDING | |
+| F | 夹具 + chrome.css / host-client.js | DONE | parse fixture ok；src/i18n 无标题；pi PASS |
 
 ## 基线
 

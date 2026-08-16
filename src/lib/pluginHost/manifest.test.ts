@@ -1,5 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isSafeUiRelPath, parseExtensionManifest } from "./manifest";
+import {
+  isSafeUiRelPath,
+  parseExtensionManifest,
+  parseExtensionManifestJson,
+} from "./manifest";
 
 const validBody = {
   schemaVersion: 1,
@@ -80,6 +86,18 @@ describe("parseExtensionManifest", () => {
     if (perms.ok) return;
     expect(perms.issues.some((i) => i.code === "permission_p1")).toBe(true);
     expect(perms.issues.some((i) => i.code === "permission_unknown")).toBe(true);
+  });
+
+  it("accepts the hello fixture manifest from disk", () => {
+    const text = readFileSync(
+      resolve("fixtures/plugin-ui-hello/grok-app-extension.json"),
+      "utf8",
+    );
+    const result = parseExtensionManifestJson(text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.id).toBe("plugin-ui-hello");
+    expect(result.manifest.sidebar[0]?.entry).toBe("ui/index.html");
   });
 
   it("requires title.en and unique pane ids", () => {
