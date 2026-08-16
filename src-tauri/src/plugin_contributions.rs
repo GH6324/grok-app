@@ -631,7 +631,6 @@ mod plugin_contrib_tests {
     }
 
     #[test]
-    #[test]
     fn plugin_contrib_storage_roundtrip_under_plugin_data() {
         let _g = crate::paths::APP_HOME_ENV_LOCK.lock().unwrap();
         let tmp = std::env::temp_dir().join(format!("grok-pc-store-{}", std::process::id()));
