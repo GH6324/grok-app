@@ -11,6 +11,9 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useThemeShell } from "@/providers/ThemeProvider";
+import { PluginContributionsProvider, usePluginContributions } from "@/providers/PluginContributionsProvider";
+import { PluginNavItems, PluginPaneHost } from "@/components/plugin-host";
+import { buildPluginHash, parsePluginHash } from "@/lib/pluginHost/hash";
 import { createPortal } from "react-dom";
 import { useFloatingMenu } from "@/lib/floatingMenu";
 import { DEFAULT_WALLPAPER_FOCUS } from "@/lib/themeSkin";
@@ -1123,6 +1126,14 @@ type PlanState = SessionPlanState;
 
 
 export function AppWorkbench() {
+  return (
+    <PluginContributionsProvider>
+      <AppWorkbenchBody />
+    </PluginContributionsProvider>
+  );
+}
+
+function AppWorkbenchBody() {
   const {
     theme,
     themePreference,
@@ -1739,7 +1750,14 @@ export function AppWorkbench() {
   /** Hash route: workbench | settings/:section | automations */
   const [appView, setAppView] = useState<"workbench" | "settings">("workbench");
   /** Inside workbench: chat thread vs scheduled tasks list. */
-  const [mainPane, setMainPane] = useState<"chat" | "automations">("chat");
+  const [mainPane, setMainPane] = useState<"chat" | "automations" | "plugin">(
+    "chat",
+  );
+  const [pluginRoute, setPluginRoute] = useState<{
+    plugin: string;
+    pane: string;
+  } | null>(null);
+  const pluginHost = usePluginContributions();
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("general");
   const [settingsTab, setSettingsTab] = useState<SettingsTabId | null>(
@@ -4230,6 +4248,36 @@ export function AppWorkbench() {
     }
   }, []);
 
+  const navigatePlugin = useCallback((plugin: string, pane: string) => {
+    if (isSecondaryWindowRef.current) return;
+    setAppView("workbench");
+    setPluginRoute({ plugin, pane });
+    setMainPane("plugin");
+    setShowUserMenu(false);
+    const hash = buildPluginHash({ plugin, pane });
+    if (hash && typeof window !== "undefined") {
+      window.location.hash = hash;
+    }
+    void pluginHost.refresh();
+  }, [pluginHost]);
+
+  useEffect(() => {
+    if (!pluginRoute) return;
+    const still = pluginHost.contributions.some(
+      (c) =>
+        c.id === pluginRoute.plugin &&
+        c.sidebar.some((s) => s.id === pluginRoute.pane),
+    );
+    if (still) return;
+    setPluginRoute(null);
+    if (mainPane === "plugin") {
+      setMainPane("chat");
+      if (typeof window !== "undefined") {
+        window.location.hash = "#/workbench";
+      }
+    }
+  }, [pluginHost.contributions, pluginRoute, mainPane]);
+
   const persistOpenTarget = useCallback((target: string) => {
     setDefaultOpenTarget(target);
     writeOpenTargetStorage(target);
@@ -4321,6 +4369,13 @@ export function AppWorkbench() {
       } else if (raw === "automations" || raw.startsWith("automations")) {
         setAppView("workbench");
         setMainPane("automations");
+      } else if (parsePluginHash(fullHash) || parsePluginHash(raw)) {
+        const route = parsePluginHash(fullHash) ?? parsePluginHash(raw);
+        if (route && !isSecondaryWindowRef.current) {
+          setAppView("workbench");
+          setPluginRoute(route);
+          setMainPane("plugin");
+        }
       } else if (raw === "" || raw === "workbench" || raw === "home") {
         setAppView("workbench");
         setMainPane("chat");
@@ -18252,6 +18307,15 @@ export function AppWorkbench() {
                 {tr("mirror.connect")}
               </button>
             ) : null}
+            {isSecondaryWindow ? null : (
+            <PluginNavItems
+              contributions={pluginHost.contributions}
+              locale={locale}
+              activePlugin={pluginRoute?.plugin}
+              activePane={pluginRoute?.pane}
+              onOpen={navigatePlugin}
+            />
+            )}
           </div>
 
           <OverlayScroll className="sidebar__scroll" viewportClassName="sidebar__scroll-inner">
@@ -19306,6 +19370,29 @@ export function AppWorkbench() {
             </div>
           </div>
 
+          {pluginRoute
+            ? (() => {
+                const contrib = pluginHost.contributions.find(
+                  (c) => c.id === pluginRoute.plugin,
+                );
+                const token =
+                  pluginHost.endpoint?.tokens[pluginRoute.plugin] ?? "";
+                const baseUrl = pluginHost.endpoint?.baseUrl ?? "";
+                if (!contrib || !token || !baseUrl) return null;
+                return (
+                  <PluginPaneHost
+                    contribution={contrib}
+                    paneId={pluginRoute.pane}
+                    baseUrl={baseUrl}
+                    token={token}
+                    locale={locale}
+                    theme={theme}
+                    tokens={{}}
+                    hidden={mainPane !== "plugin"}
+                  />
+                );
+              })()
+            : null}
           {mainPane === "automations" ? (
                         <Suspense fallback={null}>
               <AutomationsPage
@@ -19369,7 +19456,7 @@ export function AppWorkbench() {
               }}
               onRunNow={(auto) => void runAutomation(auto)}
               />            </Suspense>
-          ) : (
+          ) : mainPane === "plugin" ? null : (
           <>
           {activeProject && isProjectPathMissing(activeProject.pathOk) && (
             <div className="conn-bar">
