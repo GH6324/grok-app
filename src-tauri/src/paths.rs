@@ -51,7 +51,23 @@ pub fn ensure_app_dirs() -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(root.join("cache").join("video-posters"))?;
     // Chat image thumbs (resized JPEG for virtual-list remounts).
     std::fs::create_dir_all(root.join("cache").join("image-thumbs"))?;
+    // Per-plugin host data (storage / job artifacts). Not ~/.grok.
+    std::fs::create_dir_all(plugin_data_root())?;
     Ok(root)
+}
+
+/// `{app_data}/plugin-data` — P0 host storage root (GOAL D8).
+pub fn plugin_data_root() -> PathBuf {
+    let dir = app_data_root().join("plugin-data");
+    let _ = fs::create_dir_all(&dir);
+    dir
+}
+
+/// `{app_data}/plugin-data/{pluginId}`
+pub fn plugin_data_dir(plugin_id: &str) -> PathBuf {
+    let dir = plugin_data_root().join(plugin_id);
+    let _ = fs::create_dir_all(&dir);
+    dir
 }
 
 /// Disk cache for chat video posters: `{app_data}/cache/video-posters`.
@@ -255,6 +271,20 @@ mod tests {
     fn app_data_root_is_absolute_or_relative_path() {
         let p = app_data_root();
         assert!(!p.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn plugin_data_dir_is_under_app_data() {
+        let _g = APP_HOME_ENV_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!("grok-app-home-{}", std::process::id()));
+        std::env::set_var("GROK_APP_HOME", &tmp);
+        let root = plugin_data_root();
+        assert!(root.ends_with("plugin-data"));
+        let child = plugin_data_dir("hello-host");
+        assert!(child.ends_with("hello-host"));
+        assert!(child.starts_with(&root));
+        std::env::remove_var("GROK_APP_HOME");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

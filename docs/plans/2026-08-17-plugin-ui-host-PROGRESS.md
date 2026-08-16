@@ -7,7 +7,7 @@
 |----|------|------|------|
 | 0 | 工作树 + 设计 + pi 联审 + Goal | DONE | 分支 `feat/plugin-ui-host` @ 工作树；HANDOFF 已写 |
 | A | 契约：类型 / hash / 权限 / 清单 | DONE | vitest 13/13 + typecheck；pi PASS |
-| B | Rust 发现 + plugin-ui server | PENDING | |
+| B | Rust 发现 + plugin-ui server | DONE | cargo plugin_contrib 4 + plugin_ui 5；pi PASS |
 | C | 推荐表多项 | PENDING | |
 | D | iframe Host + bridge + Provider | PENDING | |
 | E | AppWorkbench 接线 | PENDING | |

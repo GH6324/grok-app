@@ -1,0 +1,5 @@
+/* plugin-host chrome — WP-F replaces with token-aligned shell styles */
+html, body {
+  background: transparent;
+  margin: 0;
+}

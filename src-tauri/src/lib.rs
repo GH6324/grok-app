@@ -110,6 +110,10 @@ mod path_scope;
 
 mod paths;
 
+mod plugin_contributions;
+
+mod plugin_ui_server;
+
 mod plan_chrome;
 
 mod permission;
@@ -598,6 +602,21 @@ pub fn run() {
                             tracing::error!(
                                 error = %e,
                                 "media server failed to start — local media previews may break"
+                            );
+                        }
+                    }
+                    match plugin_ui_server::start().await {
+                        Ok(h) => {
+                            tracing::info!(
+                                base_url = %h.base_url,
+                                "plugin-ui server ready"
+                            );
+                            handle.manage(h);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "plugin-ui server failed to start"
                             );
                         }
                     }
@@ -1116,6 +1135,12 @@ pub fn run() {
             commands::plugin_update,
 
             commands::plugin_validate,
+
+            plugin_contributions::plugin_contributions_list,
+
+            plugin_contributions::plugin_host_warns,
+
+            plugin_ui_server::plugin_ui_endpoint,
 
             commands::hooks_list,
 
