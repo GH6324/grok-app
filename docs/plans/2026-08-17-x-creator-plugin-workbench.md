@@ -3,7 +3,9 @@
 | 字段 | 值 |
 |------|-----|
 | 日期 | 2026-08-17 |
-| 状态 | 设计稿（调研 + 宿主契约 + 能力清单，未立项实现） |
+| 状态 | 宿主 P0 已立项。pi 联审 FLAG；执行以 `2026-08-17-plugin-ui-host-GOAL.md` 的 D1–D10 为准 |
+| 施工 | `docs/plans/2026-08-17-plugin-ui-host-GOAL.md` · `HANDOFF.md` · `PROGRESS.md` |
+| 工作树 | `~/.grok/worktrees/grok-app/plugin-ui-host` · 分支 `feat/plugin-ui-host` |
 | 产品 | 付费插件「X 博主工作台」：可视化面板 + 预置 Skill |
 | 入口 | 设置 → 扩展 → 插件 → **推荐** 安装；安装并启用后侧栏才出现该项 |
 | 商业 | App 开源（MIT）+ 独立付费插件仓 |
@@ -530,7 +532,9 @@ Tauri `invoke`；读 `auth.json` / API key / refresh token；任意文件系统�
 
 **没有** `src/components/x-creator/`。
 
-数据：`~/.grok-app/plugin-data/{pluginId}/`。不要 `~/.grok-app/x-creator/`，不要改 `~/.grok`。
+数据：`{app_data_root()}/plugin-data/{pluginId}/`（macOS 常见为 Application Support，不要字面量写 `~/.grok-app/...`）。不要 `x-creator/` 专目录，不要改 `~/.grok`。
+
+施工覆盖（pi 2026-08-17 FLAG，详见 GOAL D1–D10）：独立 plugin-ui 端口，禁止接到 `media_server`；CSP `frame-ancestors` 用宿主 origin 白名单不是 `'self'`；hash 用清单 `id`；清单只放插件根目录；`run` 学已安排后台（create+connect+send），不改 `viewingSessionId`；`mainPane` 保持字符串 `"plugin"` + `pluginRoute`。
 
 ---
 
