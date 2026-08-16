@@ -97,6 +97,7 @@ import {
   resolveExtensionsTabId,
   type RecommendedPlugin,
 } from "@/lib/pluginRecommended";
+import { requestPluginHostRefresh, usePluginContributions } from "@/providers/PluginContributionsProvider";
 import {
   buildInstalledCard,
   marketplaceCategoryMessageKey,
@@ -1181,6 +1182,7 @@ export function ExtensionsPanel({
         invalidatePluginsListCache();
         await refresh({ forcePlugins: true });
       }
+      requestPluginHostRefresh();
     } catch (e) {
       setActionError(String(e));
       setActionErrorSource("plugin");
@@ -1442,6 +1444,7 @@ export function ExtensionsPanel({
     () => listRecommendedToShow(plugins),
     [plugins],
   );
+  const pluginHost = usePluginContributions();
 
   const q = extQuery.trim().toLowerCase();
   const filterText = useCallback(
@@ -1785,6 +1788,20 @@ export function ExtensionsPanel({
       {/* Plugins — reference layout: installed strip + 2-col featured catalog */}
       {tab === "plugins" && (
       <div className="ext-ref-stack ext-ref-plugins-scroll">
+        {pluginHost.warns.length > 0 ? (
+          <section className="ext-ref-block" id="settings-anchor-ext-plugin-warns">
+            <div className="ext-ref-section-label">
+              {tr("pluginHost.warnTitle")}
+            </div>
+            <ul className="ext-alert ext-alert--warn">
+              {pluginHost.warns.map((w) => (
+                <li key={`${w.plugin}:${w.code}:${w.message}`}>
+                  {w.plugin}: {w.message}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {/* Installed strip */}
         <section
           className="ext-ref-block"

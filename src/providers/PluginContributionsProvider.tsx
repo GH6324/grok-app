@@ -18,6 +18,13 @@ export type PluginHostEndpoint = {
   tokens: Record<string, string>;
 };
 
+export const PLUGIN_HOST_REFRESH_EVENT = "grok-plugin-host-refresh";
+
+export function requestPluginHostRefresh() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(PLUGIN_HOST_REFRESH_EVENT));
+}
+
 export type PluginContributionsValue = {
   contributions: PluginContribution[];
   warns: PluginHostWarn[];
@@ -65,6 +72,15 @@ export function PluginContributionsProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     void refresh();
+    const onRefresh = () => {
+      void refresh();
+    };
+    window.addEventListener(PLUGIN_HOST_REFRESH_EVENT, onRefresh);
+    window.addEventListener("focus", onRefresh);
+    return () => {
+      window.removeEventListener(PLUGIN_HOST_REFRESH_EVENT, onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
   }, [refresh]);
 
   const value = useMemo(
