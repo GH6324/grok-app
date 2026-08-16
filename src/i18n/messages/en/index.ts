@@ -21,6 +21,7 @@ import { enSettingsAgent } from "./settings-agent";
 import { enSettingsMemory } from "./settings-memory";
 import { enSettingsCode } from "./settings-code";
 import { enSettingsRemoteIm } from "./settings-remoteIm";
+import { enPluginHost } from "./pluginHost";
 
 export const en = {
   ...enCore,
@@ -45,6 +46,7 @@ export const en = {
   ...enSettingsMemory,
   ...enSettingsCode,
   ...enSettingsRemoteIm,
+  ...enPluginHost,
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -71,3 +73,4 @@ export { enSettingsAgent } from "./settings-agent";
 export { enSettingsMemory } from "./settings-memory";
 export { enSettingsCode } from "./settings-code";
 export { enSettingsRemoteIm } from "./settings-remoteIm";
+export { enPluginHost } from "./pluginHost";

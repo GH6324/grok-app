@@ -1142,6 +1142,14 @@ pub fn run() {
 
             plugin_ui_server::plugin_ui_endpoint,
 
+            plugin_contributions::plugin_storage_get,
+
+            plugin_contributions::plugin_storage_set,
+
+            plugin_contributions::plugin_storage_list,
+
+            plugin_contributions::plugin_storage_delete,
+
             commands::hooks_list,
 
             commands::hooks_reveal,

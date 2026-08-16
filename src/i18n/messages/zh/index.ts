@@ -21,6 +21,7 @@ import { zhSettingsAgent } from "./settings-agent";
 import { zhSettingsMemory } from "./settings-memory";
 import { zhSettingsCode } from "./settings-code";
 import { zhSettingsRemoteIm } from "./settings-remoteIm";
+import { zhPluginHost } from "./pluginHost";
 
 import type { MessageKey } from "../en";
 
@@ -47,6 +48,7 @@ export const zh: Record<MessageKey, string> = {
   ...zhSettingsMemory,
   ...zhSettingsCode,
   ...zhSettingsRemoteIm,
+  ...zhPluginHost,
 };
 
 export { zhCore } from "./core";
@@ -71,3 +73,4 @@ export { zhSettingsAgent } from "./settings-agent";
 export { zhSettingsMemory } from "./settings-memory";
 export { zhSettingsCode } from "./settings-code";
 export { zhSettingsRemoteIm } from "./settings-remoteIm";
+export { zhPluginHost } from "./pluginHost";

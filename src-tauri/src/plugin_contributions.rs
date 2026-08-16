@@ -469,6 +469,69 @@ pub async fn plugin_host_warns(ui: State<'_, PluginUiHandle>) -> Result<Value, S
     Ok(serde_json::json!({ "warns": scan.warns }))
 }
 
+fn storage_file(plugin_id: &str) -> Result<std::path::PathBuf, String> {
+    if !is_plugin_id(plugin_id) {
+        return Err("invalid plugin id".into());
+    }
+    Ok(crate::paths::plugin_data_dir(plugin_id).join("storage.json"))
+}
+
+fn read_storage_bag(plugin_id: &str) -> Result<serde_json::Map<String, Value>, String> {
+    let path = storage_file(plugin_id)?;
+    if !path.is_file() {
+        return Ok(serde_json::Map::new());
+    }
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(m)) => Ok(m),
+        _ => Ok(serde_json::Map::new()),
+    }
+}
+
+fn write_storage_bag(
+    plugin_id: &str,
+    bag: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
+    let path = storage_file(plugin_id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(bag).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_storage_get(plugin_id: String, key: String) -> Result<Value, String> {
+    let bag = read_storage_bag(&plugin_id)?;
+    Ok(bag.get(&key).cloned().unwrap_or(Value::Null))
+}
+
+#[tauri::command]
+pub async fn plugin_storage_set(
+    plugin_id: String,
+    key: String,
+    value: Value,
+) -> Result<Value, String> {
+    let mut bag = read_storage_bag(&plugin_id)?;
+    bag.insert(key, value);
+    write_storage_bag(&plugin_id, &bag)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+pub async fn plugin_storage_list(plugin_id: String) -> Result<Value, String> {
+    let bag = read_storage_bag(&plugin_id)?;
+    Ok(serde_json::json!({ "keys": bag.keys().cloned().collect::<Vec<_>>() }))
+}
+
+#[tauri::command]
+pub async fn plugin_storage_delete(plugin_id: String, key: String) -> Result<Value, String> {
+    let mut bag = read_storage_bag(&plugin_id)?;
+    bag.remove(&key);
+    write_storage_bag(&plugin_id, &bag)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg(test)]
 mod plugin_contrib_tests {
     use super::*;
@@ -565,6 +628,35 @@ mod plugin_contrib_tests {
         assert!(!is_safe_ui_rel_path("ui/../secret"));
         assert!(!is_safe_ui_rel_path("skills/SKILL.md"));
         assert!(is_safe_ui_rel_path("ui/index.html"));
+    }
+
+    #[test]
+    #[test]
+    fn plugin_contrib_storage_roundtrip_under_plugin_data() {
+        let _g = crate::paths::APP_HOME_ENV_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!("grok-pc-store-{}", std::process::id()));
+        std::env::set_var("GROK_APP_HOME", &tmp);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            plugin_storage_set(
+                "hello-host".into(),
+                "k".into(),
+                json!("v"),
+            )
+            .await
+            .unwrap();
+            let got = plugin_storage_get("hello-host".into(), "k".into())
+                .await
+                .unwrap();
+            assert_eq!(got, json!("v"));
+            let listed = plugin_storage_list("hello-host".into()).await.unwrap();
+            assert_eq!(listed["keys"], json!(["k"]));
+        });
+        std::env::remove_var("GROK_APP_HOME");
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

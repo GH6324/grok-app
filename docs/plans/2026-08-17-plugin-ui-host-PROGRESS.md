@@ -9,7 +9,7 @@
 | A | 契约：类型 / hash / 权限 / 清单 | DONE | vitest 13/13 + typecheck；pi PASS |
 | B | Rust 发现 + plugin-ui server | DONE | cargo plugin_contrib 4 + plugin_ui 5；pi PASS |
 | C | 推荐表多项 | DONE | vitest pluginRecommended+settingsCatalog+i18n；typecheck；pi FLAG 已修 |
-| D | iframe Host + bridge + Provider | PENDING | |
+| D | iframe Host + bridge + Provider | DONE | vitest pluginHost+i18n；typecheck；pi PASS after FLAG |
 | E | AppWorkbench 接线 | PENDING | |
 | F | 夹具 + chrome.css / host-client.js | PENDING | |
 
