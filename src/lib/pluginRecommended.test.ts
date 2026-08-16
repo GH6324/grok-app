@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CHATCUT_CODEX_INSTALL_SOURCE,
+  CHATCUT_RECOMMENDED_ID,
   OPENAI_PLUGINS_MARKETPLACE_URL,
+  RECOMMENDED_PLUGINS,
   ensureOpenaiPluginsMarketplace,
   findChatCutInstalledPlugin,
   isChatCutInstalled,
   isOpenaiPluginsSource,
+  listRecommendedToShow,
   normalizeMarketplaceLocator,
   pickDefaultInstallableFilter,
   pluginDisplayName,
@@ -19,6 +22,21 @@ describe("pluginRecommended", () => {
     expect(OPENAI_PLUGINS_MARKETPLACE_URL).toBe(
       "https://github.com/openai/plugins",
     );
+  });
+
+  it("recommended table is multi-row-ready and only lists ChatCut this slice", () => {
+    expect(RECOMMENDED_PLUGINS.length).toBeGreaterThanOrEqual(1);
+    expect(RECOMMENDED_PLUGINS.map((r) => r.id)).toEqual([
+      CHATCUT_RECOMMENDED_ID,
+    ]);
+    expect(RECOMMENDED_PLUGINS.every((r) => r.id === CHATCUT_RECOMMENDED_ID)).toBe(
+      true,
+    );
+    expect(listRecommendedToShow([])).toHaveLength(1);
+    expect(
+      listRecommendedToShow([{ name: "codex" }]),
+    ).toHaveLength(0);
+    expect(listRecommendedToShow([{ name: "codex" }])[0]?.id).toBeUndefined();
   });
 
   it("normalizes marketplace locator variants", () => {

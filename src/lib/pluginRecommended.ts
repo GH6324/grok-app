@@ -1,6 +1,6 @@
 /**
  * Pure helpers for Settings → Extensions plugins tab:
- * - Recommended ChatCut (#codex) matching
+ * - Recommended marketplace-metadata table (ChatCut only this slice)
  * - ensure openai/plugins marketplace (idempotent soft-fail)
  * - default installable filter preference
  */
@@ -80,6 +80,16 @@ export function findOpenaiPluginsSource<T extends MarketplaceSourceLikeForMatch>
   return sources.find((s) => isOpenaiPluginsSource(s)) ?? null;
 }
 
+export type RecommendedPlugin = {
+  id: string;
+  installSource: string;
+  nameKey: string;
+  descKey: string;
+  matchInstalled: (
+    plugins: readonly PluginLikeForMatch[] | null | undefined,
+  ) => boolean;
+};
+
 /** True when installed list already has ChatCut (name or source path). */
 export function isChatCutInstalled(
   plugins: readonly PluginLikeForMatch[] | null | undefined,
@@ -112,6 +122,27 @@ export function findChatCutInstalledPlugin<T extends PluginLikeForMatch>(
     if (isChatCutInstalled([p])) return p;
   }
   return null;
+}
+
+/**
+ * Marketplace-metadata recommended rows (GOAL D9).
+ * This slice: ChatCut only. No fixture titles, no invented X git URL.
+ */
+export const RECOMMENDED_PLUGINS: readonly RecommendedPlugin[] = [
+  {
+    id: CHATCUT_RECOMMENDED_ID,
+    installSource: CHATCUT_CODEX_INSTALL_SOURCE,
+    nameKey: "ext.plugins.recommended.chatcutName",
+    descKey: "ext.plugins.recommended.chatcutDesc",
+    matchInstalled: isChatCutInstalled,
+  },
+];
+
+/** Uninstalled recommended rows, in table order. */
+export function listRecommendedToShow(
+  plugins: readonly PluginLikeForMatch[] | null | undefined,
+): RecommendedPlugin[] {
+  return RECOMMENDED_PLUGINS.filter((row) => !row.matchInstalled(plugins));
 }
 
 /**
