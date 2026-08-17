@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createT, type Locale } from "@/i18n";
 import type { PluginContribution } from "@/lib/api/pluginHost";
 import {
@@ -23,7 +23,8 @@ import * as api from "@/lib/api";
 import type { SessionSnapshot } from "@/lib/session";
 import { saveComposerSessionDraft } from "@/lib/composerSessionDraft";
 import { GlassModal } from "@/components/GlassModal";
-import { useState } from "react";
+
+const EMPTY_THEME_TOKENS: Record<string, string> = {};
 
 type DialogState =
   | null
@@ -69,10 +70,13 @@ export function PluginPaneHost({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const jobsRef = useRef<Map<string, PluginJob>>(new Map());
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [loadedSrc, setLoadedSrc] = useState("");
+  const [frameFailed, setFrameFailed] = useState(false);
   const pane = contribution.sidebar.find((s) => s.id === paneId);
   const src = pane
     ? iframeSrc(baseUrl, contribution.id, token, pane.entry)
     : "";
+  const themeTokens = Object.keys(tokens).length ? tokens : EMPTY_THEME_TOKENS;
 
   const origin = useMemo(() => {
     try {
@@ -105,7 +109,7 @@ export function PluginPaneHost({
       paneId,
       locale,
       theme,
-      tokens,
+      tokens: themeTokens,
       appVersion: "0.2.20",
       permissions: contribution.permissions,
       sessions: {
@@ -192,7 +196,7 @@ export function PluginPaneHost({
       },
       focusPane: () => {},
     }),
-    [contribution, locale, openDialog, paneId, postToFrame, theme, tokens],
+    [contribution, locale, openDialog, paneId, postToFrame, theme, themeTokens],
   );
 
   useEffect(() => {
@@ -274,45 +278,62 @@ export function PluginPaneHost({
     };
   }, [locale, openDialog, postToFrame]);
 
+  const frameReady = !!src && loadedSrc === src && !frameFailed;
+
   if (!pane || !src) {
-    return <div className="plugin-pane-host">{tr("pluginHost.empty")}</div>;
+    return (
+      <div
+        className="plugin-pane-host"
+        hidden={hidden}
+        style={hidden ? { display: "none" } : undefined}
+      >
+        {tr("pluginHost.empty")}
+      </div>
+    );
   }
 
   return (
     <div
-      className="plugin-pane-host"
-      style={{
-        display: hidden ? "none" : "flex",
-        flex: 1,
-        minHeight: 0,
-        overflow: "hidden",
-      }}
+      className={
+        "plugin-pane-host" + (hidden ? " plugin-pane-host--hidden" : "")
+      }
+      hidden={hidden}
     >
+      {!frameReady ? (
+        <div className="plugin-pane-host__status" role="status">
+          {tr(
+            frameFailed && loadedSrc === src
+              ? "pluginHost.loadFailed"
+              : "pluginHost.loading",
+          )}
+        </div>
+      ) : null}
       <iframe
         ref={iframeRef}
+        className="plugin-pane-host__frame"
         title={pane.titleEn}
         src={src}
         onLoad={() => {
+          setFrameFailed(false);
+          setLoadedSrc(src);
           postToFrame(
             hostReadyPayload({
               pluginId: contribution.id,
               paneId,
               locale,
               theme,
-              tokens,
+              tokens: themeTokens,
               appVersion: "0.2.20",
               permissions: contribution.permissions,
             }),
           );
         }}
+        onError={() => {
+          setFrameFailed(true);
+          setLoadedSrc(src);
+        }}
         sandbox="allow-scripts allow-forms allow-same-origin"
         allow=""
-        style={{
-          border: 0,
-          width: "100%",
-          height: "100%",
-          background: "transparent",
-        }}
       />
       <GlassModal
         open={!!dialog}

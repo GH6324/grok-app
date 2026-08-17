@@ -63,7 +63,8 @@ export function PluginContributionsProvider({ children }: { children: ReactNode 
           : null,
       );
     } catch {
-      setContributions([]);
+      // Keep last-good contributions so a slow/failed rescan cannot
+      // unmount a live iframe or clear sidebar highlight.
       setWarns([]);
     } finally {
       setLoading(false);
@@ -76,10 +77,8 @@ export function PluginContributionsProvider({ children }: { children: ReactNode 
       void refresh();
     };
     window.addEventListener(PLUGIN_HOST_REFRESH_EVENT, onRefresh);
-    window.addEventListener("focus", onRefresh);
     return () => {
       window.removeEventListener(PLUGIN_HOST_REFRESH_EVENT, onRefresh);
-      window.removeEventListener("focus", onRefresh);
     };
   }, [refresh]);
 

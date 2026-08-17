@@ -1,2 +1,6 @@
 export { PluginPaneHost } from "./PluginPaneHost";
-export { PluginNavItems } from "./PluginNavItems";
+export {
+  PluginNavItems,
+  isPluginNavActive,
+  pluginSidebarTitle,
+} from "./PluginNavItems";

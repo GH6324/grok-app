@@ -12,8 +12,24 @@ import {
 } from "react";
 import { useThemeShell } from "@/providers/ThemeProvider";
 import { PluginContributionsProvider, usePluginContributions } from "@/providers/PluginContributionsProvider";
-import { PluginNavItems, PluginPaneHost } from "@/components/plugin-host";
+import {
+  PluginNavItems,
+  PluginPaneHost,
+  pluginSidebarTitle,
+} from "@/components/plugin-host";
 import { buildPluginHash, parsePluginHash } from "@/lib/pluginHost/hash";
+
+const NO_PLUGIN_THEME_TOKENS: Record<string, string> = {};
+
+function rememberPluginRoute(
+  prev: { plugin: string; pane: string }[],
+  next: { plugin: string; pane: string },
+): { plugin: string; pane: string }[] {
+  if (prev.some((r) => r.plugin === next.plugin && r.pane === next.pane)) {
+    return prev;
+  }
+  return [...prev, next];
+}
 import { createPortal } from "react-dom";
 import { useFloatingMenu } from "@/lib/floatingMenu";
 import { DEFAULT_WALLPAPER_FOCUS } from "@/lib/themeSkin";
@@ -1757,6 +1773,11 @@ function AppWorkbenchBody() {
     plugin: string;
     pane: string;
   } | null>(null);
+  /** Keep visited plugin iframes mounted (hide, do not remount). */
+  const [openedPluginRoutes, setOpenedPluginRoutes] = useState<
+    { plugin: string; pane: string }[]
+  >([]);
+  const skipPluginHashUntilRef = useRef<string | null>(null);
   const pluginHost = usePluginContributions();
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>("general");
@@ -4250,19 +4271,29 @@ function AppWorkbenchBody() {
 
   const navigatePlugin = useCallback((plugin: string, pane: string) => {
     if (isSecondaryWindowRef.current) return;
+    const route = { plugin, pane };
     setAppView("workbench");
-    setPluginRoute({ plugin, pane });
+    setPluginRoute(route);
+    setOpenedPluginRoutes((prev) => rememberPluginRoute(prev, route));
     setMainPane("plugin");
     setShowUserMenu(false);
-    const hash = buildPluginHash({ plugin, pane });
-    if (hash && typeof window !== "undefined") {
+    const hash = buildPluginHash(route);
+    if (hash && typeof window !== "undefined" && window.location.hash !== hash) {
+      skipPluginHashUntilRef.current = hash;
       window.location.hash = hash;
+      if (window.location.hash !== hash) {
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}${hash}`,
+        );
+      }
     }
-    void pluginHost.refresh();
-  }, [pluginHost]);
+  }, []);
 
   useEffect(() => {
     if (!pluginRoute) return;
+    if (pluginHost.loading && pluginHost.contributions.length === 0) return;
     const still = pluginHost.contributions.some(
       (c) =>
         c.id === pluginRoute.plugin &&
@@ -4270,13 +4301,14 @@ function AppWorkbenchBody() {
     );
     if (still) return;
     setPluginRoute(null);
+    setOpenedPluginRoutes([]);
     if (mainPane === "plugin") {
       setMainPane("chat");
       if (typeof window !== "undefined") {
         window.location.hash = "#/workbench";
       }
     }
-  }, [pluginHost.contributions, pluginRoute, mainPane]);
+  }, [pluginHost.contributions, pluginHost.loading, pluginRoute, mainPane]);
 
   const persistOpenTarget = useCallback((target: string) => {
     setDefaultOpenTarget(target);
@@ -4333,6 +4365,14 @@ function AppWorkbenchBody() {
   useEffect(() => {
     const syncFromHash = () => {
       const fullHash = window.location.hash || "";
+      if (
+        skipPluginHashUntilRef.current &&
+        fullHash === skipPluginHashUntilRef.current
+      ) {
+        skipPluginHashUntilRef.current = null;
+        return;
+      }
+      skipPluginHashUntilRef.current = null;
       const raw = fullHash.replace(/^#\/?/, "");
       if (raw.startsWith("settings")) {
         const parts = raw.split("/").filter(Boolean);
@@ -4374,6 +4414,7 @@ function AppWorkbenchBody() {
         if (route && !isSecondaryWindowRef.current) {
           setAppView("workbench");
           setPluginRoute(route);
+          setOpenedPluginRoutes((prev) => rememberPluginRoute(prev, route));
           setMainPane("plugin");
         }
       } else if (raw === "" || raw === "workbench" || raw === "home") {
@@ -18311,8 +18352,10 @@ function AppWorkbenchBody() {
             <PluginNavItems
               contributions={pluginHost.contributions}
               locale={locale}
-              activePlugin={pluginRoute?.plugin}
-              activePane={pluginRoute?.pane}
+              activePlugin={
+                mainPane === "plugin" ? pluginRoute?.plugin : null
+              }
+              activePane={mainPane === "plugin" ? pluginRoute?.pane : null}
               onOpen={navigatePlugin}
             />
             )}
@@ -19144,6 +19187,24 @@ function AppWorkbenchBody() {
                     {tr("automations.title")}
                   </h1>
                 </>
+              ) : mainPane === "plugin" && pluginRoute ? (
+                <>
+                  {!phoneLayout ? (
+                    <span className="main__title-icon" aria-hidden>
+                      ◆
+                    </span>
+                  ) : null}
+                  <h1 className="main__title" data-tauri-drag-region>
+                    {(() => {
+                      const pane = pluginHost.contributions
+                        .find((c) => c.id === pluginRoute.plugin)
+                        ?.sidebar.find((s) => s.id === pluginRoute.pane);
+                      return pane
+                        ? pluginSidebarTitle(pane, locale)
+                        : pluginRoute.plugin;
+                    })()}
+                  </h1>
+                </>
               ) : (
                 (() => {
                   const cur = sessions.find((s) => s.id === session.sessionId);
@@ -19370,29 +19431,32 @@ function AppWorkbenchBody() {
             </div>
           </div>
 
-          {pluginRoute
-            ? (() => {
+          {openedPluginRoutes.map((route) => {
                 const contrib = pluginHost.contributions.find(
-                  (c) => c.id === pluginRoute.plugin,
+                  (c) => c.id === route.plugin,
                 );
                 const token =
-                  pluginHost.endpoint?.tokens[pluginRoute.plugin] ?? "";
+                  pluginHost.endpoint?.tokens[route.plugin] ?? "";
                 const baseUrl = pluginHost.endpoint?.baseUrl ?? "";
                 if (!contrib || !token || !baseUrl) return null;
+                const visible =
+                  mainPane === "plugin" &&
+                  pluginRoute?.plugin === route.plugin &&
+                  pluginRoute?.pane === route.pane;
                 return (
                   <PluginPaneHost
+                    key={`${route.plugin}:${route.pane}`}
                     contribution={contrib}
-                    paneId={pluginRoute.pane}
+                    paneId={route.pane}
                     baseUrl={baseUrl}
                     token={token}
                     locale={locale}
                     theme={theme}
-                    tokens={{}}
-                    hidden={mainPane !== "plugin"}
+                    tokens={NO_PLUGIN_THEME_TOKENS}
+                    hidden={!visible}
                   />
                 );
-              })()
-            : null}
+              })}
           {mainPane === "automations" ? (
                         <Suspense fallback={null}>
               <AutomationsPage
