@@ -26,10 +26,12 @@ See `docs/llm-wiki/release.md`.
 ### Fixed
 - Mac Control+Return steers a live turn again (#1023).
 - Windows Explorer drag-drop works again (sidebar add project, chat attach). No more forbidden cursor after a hidden window create (#1017).
+- Image prompts no longer paint two user bubbles (#1021).
 
 **中文 · 修复**
 - Mac 上 Control+Return 又能引导当前回合（#1023）。
 - Windows 从资源管理器拖文件/文件夹恢复可用（侧栏加项目、聊天加附件），不再显示禁止光标（#1017）。
+- 带图发送不再画出两条用户气泡（#1021）。
 
 ## [0.2.31] - 2026-09-04
 
