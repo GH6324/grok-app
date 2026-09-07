@@ -23,6 +23,7 @@ See `docs/llm-wiki/release.md`.
 - Image lightbox close stays closed when a late load finishes (#1081).
 - Wallpaper X search drains CLI output so hung pipes time out cleanly (#1086).
 - Wallpaper X results drop non-image pages and rank clearer media first (#1085).
+- Wallpaper X search can be cancelled and shows prepare / search / validate progress (#1087).
 - Opening a file in Review keeps the macOS title bar visible. Focus scrolls only inside Review (#1041).
 - Advanced context-window Save stays fully clickable. The flyout no longer clips the button (#1047).
 - Linux AppImage prefers host WebKitGTK to avoid black screens and SIGBUS on quit. Helpers stay on disk so FUSE unmount is safe (#539).
@@ -39,6 +40,7 @@ See `docs/llm-wiki/release.md`.
 - 图片预览关闭后，迟到的加载不会再把它打开（#1081）。
 - 壁纸 X 搜索并行排空 CLI 输出，管道堵死时能按时退出（#1086）。
 - 壁纸 X 结果会丢掉非图片页，并优先更清晰的媒体（#1085）。
+- 壁纸 X 搜索可取消，并显示准备 / 搜索 / 校验进度（#1087）。
 - 在 Review 中打开文件时，macOS 标题栏保持可见。只滚动 Review 内部列表（#1041）。
 - Advanced 里上下文窗口的「保存」可正常点到。浮层不再裁掉按钮（#1047）。
 - Linux AppImage 优先用本机 WebKitGTK，避免黑屏和退出时 SIGBUS。子进程不再映射在 squashfs 上（#539）。
