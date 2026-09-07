@@ -14,6 +14,14 @@ See `docs/llm-wiki/release.md`.
 ## [Unreleased]
 
 ### Fixed
+- Windows titlebar drag moves the window again on older WebView2 (#1075).
+- Feishu remote-control setup shows the publish / availability guide (same as Lark).
+- Search no longer applies results after you close the palette (#1078).
+- Local media previews bind to browser-safe ports (#1076).
+- Windows Explorer drop cleans up failed transfers more reliably (#1077).
+- Legacy proxy mode `use` migrates the same way in UI and Host (#1079).
+- Image lightbox close stays closed when a late load finishes (#1081).
+- Wallpaper X search drains CLI output so hung pipes time out cleanly (#1086).
 - Opening a file in Review keeps the macOS title bar visible. Focus scrolls only inside Review (#1041).
 - Advanced context-window Save stays fully clickable. The flyout no longer clips the button (#1047).
 - Linux AppImage prefers host WebKitGTK to avoid black screens and SIGBUS on quit. Helpers stay on disk so FUSE unmount is safe (#539).
@@ -21,6 +29,14 @@ See `docs/llm-wiki/release.md`.
 - Plugin authorization keeps secrets out of process command lines.
 
 **中文 · 修复**
+- Windows 标题栏在旧版 WebView2 上又能拖动窗口（#1075）。
+- 飞书远程控制显示与 Lark 相同的「发布 / 可用性」引导步骤。
+- 关掉搜索面板后，迟到的结果不再写回（#1078）。
+- 本地媒体预览绑定到浏览器安全端口（#1076）。
+- Windows 资源管理器拖放在失败时更干净地释放（#1077）。
+- 旧代理模式 `use` 在界面与 Host 侧迁移一致（#1079）。
+- 图片预览关闭后，迟到的加载不会再把它打开（#1081）。
+- 壁纸 X 搜索并行排空 CLI 输出，管道堵死时能按时退出（#1086）。
 - 在 Review 中打开文件时，macOS 标题栏保持可见。只滚动 Review 内部列表（#1041）。
 - Advanced 里上下文窗口的「保存」可正常点到。浮层不再裁掉按钮（#1047）。
 - Linux AppImage 优先用本机 WebKitGTK，避免黑屏和退出时 SIGBUS。子进程不再映射在 squashfs 上（#539）。
@@ -34,12 +50,14 @@ See `docs/llm-wiki/release.md`.
 - Ctrl+Tab 切回上一个用过的对话。按住 Ctrl 再点 Tab 继续循环；Ctrl+Shift+Tab 反向。
 
 ### Changed
+- Streaming chat, heatmap hover, and SSH sidebar refresh do less re-rendering (#1073).
 - Default workspace uses a house icon in the sidebar and composer (#1069).
 - Sidebar Other now uses the same name as the composer chip: Default workspace (#1067).
 - Startup skips TipTap and markdown preloads; Office and Settings load on demand (#1055, #1063).
 - Expanded sidebar pins remaining SuperGrok quota without opening the account menu (#1048). Settings is a footer gear; the account menu keeps theme and sign-in.
 
 **中文 · 变更**
+- 流式对话、热力图像悬停与 SSH 侧栏刷新减少无效重渲染（#1073）。
 - 默认工作区在侧栏和输入框改用小房子图标（#1069）。
 - 侧栏「其他会话」与输入框统一为「默认工作区」（#1067）。
 - 启动不再预载 TipTap / markdown；Office 与设置页按需加载（#1055、#1063）。

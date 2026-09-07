@@ -1067,7 +1067,7 @@ export function RemoteImChannelPanel({
           </p>
         </div>
       ) : null}
-{channelId === "lark" ? (
+{channelId === "feishu" || channelId === "lark" ? (
         <div className="rim-callout" data-feishu-guide="1" data-validate="validateFeishuConfig">
           <div className="rim-callout__title">
             {t("settings.remoteIm.feishu.guide.title")}

@@ -207,9 +207,9 @@ textarea:focus-visible,
 }
 
 /* Tauri window drag regions.
- * `false` only skips JS `start_dragging` (Tauri drag.js). Keep compositor
- * caption drag: WebView2 covers the client, so parent WM_NCHITTEST never
- * sees titlebar clicks. */
+ * Hosts use `data-tauri-drag-region="deep"` so drag.js can start_dragging
+ * (#1075). Keep compositor caption drag too: WebView2 covers the client,
+ * so parent WM_NCHITTEST never sees titlebar clicks. */
 [data-tauri-drag-region] {
   -webkit-app-region: drag;
   app-region: drag;
