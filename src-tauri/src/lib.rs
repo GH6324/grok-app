@@ -208,6 +208,9 @@ mod turn_lease;
 
 mod host_runtime;
 
+#[cfg(target_os = "linux")]
+mod linux_webkit;
+
 mod win_crash;
 
 mod updater;
@@ -262,9 +265,17 @@ pub fn run() {
         std::process::exit(session_api::run_cli());
     }
 
+    // Before host_runtime: a successful exec replaces this process, so it must
+    // not write a heartbeat the successor would treat as an unclean shutdown.
+    #[cfg(target_os = "linux")]
+    crate::linux_webkit::maybe_reexec_for_system_webkit();
+
     let _ = paths::ensure_app_dirs();
 
     logging::init();
+
+    #[cfg(target_os = "linux")]
+    crate::linux_webkit::log_system_webkit_choice();
 
     crate::host_runtime::on_process_start();
     crate::win_crash::install();
@@ -1847,6 +1858,9 @@ pub fn run() {
                     host.inner().stop_sync();
 
                 }
+
+                #[cfg(target_os = "linux")]
+                crate::linux_webkit::wait_for_appimage_webkit_helpers();
 
             }
 
