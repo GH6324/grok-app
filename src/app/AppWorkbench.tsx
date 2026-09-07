@@ -572,6 +572,11 @@ const BottomTerminal = lazy(async () => {
   const m = await import("@/components/bottom-terminal/BottomTerminal");
   return { default: m.BottomTerminal };
 });
+// Settings tree (~12k lines) only loads when the settings overlay opens.
+const WorkbenchSettingsStage = lazy(async () => {
+  const m = await import("@/app/WorkbenchSettingsStage");
+  return { default: m.WorkbenchSettingsStage };
+});
 
 import {
   isTypingTarget,
@@ -686,7 +691,6 @@ import { WorkbenchSessionModals } from "@/app/WorkbenchSessionModals";
 import { WorkbenchChromeOverlays } from "@/app/WorkbenchChromeOverlays";
 import { WorkbenchComposerColumn } from "@/app/WorkbenchComposerColumn";
 import { WorkbenchFloatingMenus } from "@/app/WorkbenchFloatingMenus";
-import { WorkbenchSettingsStage } from "@/app/WorkbenchSettingsStage";
 import { WorkbenchChatStage } from "@/app/WorkbenchChatStage";
 import { useSessionExportText } from "@/hooks/useSessionExportText";
 import { useSessionExportImage } from "@/hooks/useSessionExportImage";
@@ -12179,6 +12183,7 @@ export function AppWorkbench() {
       {appGate === "ready" && (
       <>
       {settingsOpen ? (
+      <Suspense fallback={null}>
       <WorkbenchSettingsStage
         account={account}
         accountBusy={accountBusy}
@@ -12404,6 +12409,7 @@ export function AppWorkbench() {
         workflowsEnabled={workflowsEnabled}
         zenMode={zenMode}
       />
+      </Suspense>
       ) : null}
       <div
         className={
