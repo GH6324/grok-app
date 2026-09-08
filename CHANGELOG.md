@@ -14,6 +14,7 @@ See `docs/llm-wiki/release.md`.
 ## [Unreleased]
 
 ### Fixed
+- Official login is restored from the App agent-home mirror when `~/.grok/auth.json` was wiped.
 - Windows titlebar drag moves the window again on older WebView2 (#1075).
 - Feishu remote-control setup shows the publish / availability guide (same as Lark).
 - Search no longer applies results after you close the palette (#1078).
@@ -31,6 +32,7 @@ See `docs/llm-wiki/release.md`.
 - Plugin authorization keeps secrets out of process command lines.
 
 **中文 · 修复**
+- 当 `~/.grok/auth.json` 被清掉时，会从 App agent-home 镜像恢复官方登录。
 - Windows 标题栏在旧版 WebView2 上又能拖动窗口（#1075）。
 - 飞书远程控制显示与 Lark 相同的「发布 / 可用性」引导步骤。
 - 关掉搜索面板后，迟到的结果不再写回（#1078）。
