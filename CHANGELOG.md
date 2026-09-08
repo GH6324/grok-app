@@ -48,9 +48,25 @@ See `docs/llm-wiki/release.md`.
 - 插件授权密钥不再出现在进程命令行中。
 
 ### Added
+- Wallpaper X can use Responses search with a clear fallback to CLI (#1088).
+- Wallpaper X Responses search shows validated images in batches as paths finish (#1089).
+- Wallpaper X Responses search reuses recent verified results for the same query (#1090).
+- Wallpaper X Responses search can load more images without clearing the gallery (#1091).
+- Wallpaper sources add Openverse and Pexels search with paging and Pexels key setup (#1096).
+- Openverse and Pexels prefetch the next page after a successful search (#1097).
+- Wallpaper sources add a separate Web image search with safe preview download (#1099).
+- Wallpaper sources can browse your Grok Saved album after a secure sign-in check (#1103).
 - Ctrl+Tab jumps back to the last chat you used. Hold Ctrl and tap Tab to cycle further; Ctrl+Shift+Tab goes the other way.
 
 **中文 · 新增**
+- 壁纸 X 可用 Responses 搜索，失败时清楚回退到 CLI（#1088）。
+- 壁纸 X 的 Responses 搜索会按完成批次逐步显示已校验图片（#1089）。
+- 壁纸 X 的 Responses 搜索会复用同一查询的近期已验证结果（#1090）。
+- 壁纸 X 的 Responses 搜索可加载更多，且不清空已有图库（#1091）。
+- 壁纸来源新增 Openverse / Pexels 搜索、分页与 Pexels Key 设置（#1096）。
+- Openverse / Pexels 在成功搜索后会预取下一页（#1097）。
+- 壁纸来源新增独立的 Web 图片搜索，并安全下载预览（#1099）。
+- 壁纸来源可在安全登录校验后浏览 Grok Saved 相册（#1103）。
 - Ctrl+Tab 切回上一个用过的对话。按住 Ctrl 再点 Tab 继续循环；Ctrl+Shift+Tab 反向。
 
 ### Changed
