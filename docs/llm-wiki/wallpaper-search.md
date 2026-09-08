@@ -256,6 +256,31 @@ Paging failures preserve the gallery and continuation for retry. The separate
 prefetch follow-up described above adds one-page-ahead loading without changing
 this page's visible controls.
 
+## Per-source browsing history
+
+While the source picker remains open, each of its seven sources keeps an
+independent browsing snapshot. A snapshot includes the search query and sort,
+visible rows, selected card, gallery filters, local-library collection,
+completion text, continuation state and gallery scroll position. Returning to a
+source restores that state instead of presenting a blank gallery or repeating a
+completed request. A completed provider prefetch remains available for the next
+explicit load-more action; an in-flight request is still cancelled on source
+change and is never adopted late.
+
+History is renderer-memory only, expires after 20 minutes and rejects snapshots
+above 2,000 rows. Closing the picker clears every source snapshot. The local
+library waits for its query cache to become current before restoring scroll, so
+returning to a cached query does not add a Host page request. Catalog mutations
+update stored snapshots so restored cards cannot regress favorite or local-path
+state.
+
+Grok Saved stores only its filters, selection and scroll position; authenticated
+album rows remain owned by the isolated album controller and are never copied
+into generic source history. Its scroll is restored only after the matching
+album revision is ready. A page, account or identity revision clears the saved
+filters, selection and scroll. Replacing or removing the Pexels credential also
+clears its prior continuation and browsing snapshot.
+
 ## Local library catalog Host contract
 
 The local wallpaper library keeps its media files in the existing wallpaper
@@ -281,3 +306,102 @@ pairs and returns only unchanged local files; replacements at the same path get 
 new identity and cannot inherit an old remote-origin association. Lookup by media
 ID applies the same containment, signature and replacement checks. The legacy
 list and delete commands remain registered for existing clients.
+
+## Catalog actions in the source picker
+
+Each media card offers a local favorite toggle. Remote originals are downloaded
+through their existing source-specific Host path and registered with source,
+author and license metadata before saving favorite state. Cards with an existing
+local path reuse that file. Unfavoriting removes the card from the Favorites
+view immediately but preserves the media file in All media.
+
+Search results recover unchanged local paths, known dimensions and favorite
+state through catalog lookups of at most 96 source/media pairs. Late lookups
+cannot overwrite a newer favorite or update a closed source. Grok Saved cards
+are eligible only while the isolated album reports ready; this lookup does not
+replace its authentication or media-transfer boundary.
+
+While a favorite is saving, duplicate toggles and preview/delete/apply actions
+on that card are disabled. Source changes and close invalidate pending UI
+updates. Failures preserve the previous favorite state and allow retry; a
+successful retry clears the save error. A catalog failure during preview keeps
+the card available, since a metadata failure does not invalidate the image.
+Removing a visible row also updates its collection and media-kind counts; a
+later snapshot page cannot restore the old counts. An empty filtered library
+offers the existing clear-filter action instead of claiming no files are saved.
+
+## Media details and generation lineage
+
+Every visible card exposes a separate information action. The nested details
+dialog shows known pixel dimensions, file size, source, author, license, local
+path, prompt and recorded generation parameters without making unknown legacy
+fields appear authoritative. Public attribution actions accept only HTTPS URLs
+without embedded credentials and remove query strings and fragments before
+opening them.
+
+Generated media can resolve its recorded parent through the catalog's bounded
+ID lookup. Missing, replaced or invalid parents leave the current details open
+with a retryable message. Late lookups are discarded after close or card
+replacement. A parent preview owns Escape before the nested details dialog and
+is cancelled if the details layer closes while preview resolution is pending.
+
+Prompt reuse only prefills the existing Imagine form and switches to that
+source when needed; it never starts generation automatically. Filtering away a
+card closes its details and restoring the card does not reopen stale UI state.
+
+## Imagine generation, image editing and image-to-video
+
+The Imagine source owns three explicit modes: generate an image, edit a selected
+image, and animate a selected image. Every image card can open the edit or video
+mode; video cards expose neither action. Selecting an action first materializes
+the image through its existing source-specific Host path. Public providers keep
+their HTTPS, signature and provenance checks, while Grok Saved keeps its isolated
+WebView bridge. Browser cookies, tokens and caller-supplied headers never cross
+into the main renderer or these generation commands.
+
+Plain image generation uses a fresh UUID request, output directory and restricted
+`image_gen` session. Image editing uses the same bounded source snapshot and the
+restricted `image_edit` tool. `auto` sends one reference; explicit `16:9`, `9:16`,
+`1:1` and `4:3` edits send the same immutable snapshot twice so the upstream
+multi-reference contract applies its native aspect ratio. The Host audits exactly
+one completed call with the requested prompt, ratio and source. It rejects changed
+arguments, extra calls, ambiguous outputs and stale files instead of scanning an
+older output directory or trusting final model prose. Neither operation retries or
+creates variants automatically.
+
+Video mode immediately fills an editable, localized motion prompt without another
+model or network request. Only an Imagine item's original prompt may contribute up
+to 240 Unicode characters of scene context; captions, URLs, Saved timestamps and
+copy from every other source are excluded. Control and bidi characters are removed
+while ZWJ and ZWNJ are preserved. The available options are 6 or 10 seconds and
+480p or 720p, defaulting to 6 seconds and 480p.
+
+`wallpaper_image_to_video` runs the local Grok Build CLI with low effort, at most
+three turns and a 420-second hard timeout. The runner fixes `--tools` to the one
+requested media tool, disallows `search_tool,use_tool`, disables web search and
+subagents, creates a new session UUID, and uses the canonical shared `GROK_HOME`.
+The renderer cannot choose a model, tool, CLI argument or output directory. The
+Host accepts only the one audited result from that session's `videos` directory,
+then revalidates path containment, signature, MIME, extension and the 200 MiB
+limit before copying it into the owned wallpaper directory.
+
+AVIF, WebP and GIF inputs are decoded in the app WebView to a PNG with a 2,048 px
+maximum edge. Raw IPC input is limited to 40 MiB and the encoded PNG to 20 MiB.
+The Host independently validates the original path inside the wallpaper root,
+limits decoding to 16,384 px per edge, 50 million pixels and 256 MiB allocation,
+applies EXIF orientation after bounded resizing, strips metadata and writes a new
+task-local PNG snapshot. No shell, ffmpeg or user-installed converter is used.
+
+All three modes share sticky UUID cancellation, including cancellation that arrives
+before Host registration. Cancelling, closing the picker, leaving Imagine or
+unmounting terminates the process tree, ignores late renderer results and removes
+failed task output. Successful media is registered in the catalog as generated
+content with the audited prompt and parameters; edit and video records also keep
+the source media as their parent. A catalog write failure preserves the generated
+file and returns `catalog_write_failed` without silently rerunning generation.
+
+Upstream failures are classified only after auditing the complete tool log. Known
+tool-owned HTTP and transport prefixes map to stable auth, access, rate-limit,
+request, upstream, network and timeout codes. URLs, response bodies and model text
+are never parsed for error classification. The form and existing gallery remain
+available for an explicit manual retry.
