@@ -233,7 +233,8 @@ it("puts the full SuperGrok quota card at the top of the open user menu", () => 
   const quota = document.querySelector(".user-menu__quota");
   expect(quota).toBeTruthy();
   expect(quota?.textContent).toContain("SuperGrok");
-  expect(quota?.textContent).toContain("Resets");
+  expect(quota?.textContent).not.toContain("Resets");
+  expect(quota?.textContent).toMatch(/\d{2}\/\d{2}/);
   expect(quota?.textContent).toContain("89%");
   expect(document.querySelector(".user-menu__quota .account-quota-bar")).toBeTruthy();
 });

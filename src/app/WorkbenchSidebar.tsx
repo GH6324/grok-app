@@ -224,9 +224,7 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
       ? tierLabel(account.billing, account.channel ?? "none")
       : "Grok Build";
   const pinResetText =
-    signedInOfficial && resetTime
-      ? `${tr("account.resetsAt")} ${resetTime}`
-      : null;
+    signedInOfficial && resetTime ? resetTime : null;
   const providerBalance =
     providerBalanceCache != null &&
     providerBalanceCache.providerId === activeCustomProvider?.id
