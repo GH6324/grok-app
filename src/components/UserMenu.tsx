@@ -1,6 +1,6 @@
 /**
- * Personal center — compact upward menu: what's new · theme · login/logout.
- * Quota and Settings live on the expanded sidebar footer, not here.
+ * Personal center — compact upward menu.
+ * Optional quota / provider-balance header sits above what's new · theme · auth.
  */
 
 import {
@@ -29,6 +29,24 @@ import {
 import { OPEN_PRESENCE_MS, useOpenPresence } from "@/lib/openPresence";
 import type { AccountStatus, CustomProvider } from "@/lib/api";
 
+export type UserMenuOfficialQuota = {
+  plan: string;
+  resetText: string | null;
+  remainLabel: string | null;
+  usedPercent: number | null;
+  remainLow?: boolean;
+  barFillClass: string;
+};
+
+export type UserMenuProviderBalance = {
+  line: string | null;
+  busy: boolean;
+  error: string | null;
+  refreshLabel: string;
+  refreshingLabel: string;
+  onRefresh: () => void;
+};
+
 export interface UserMenuProps {
   open: boolean;
   /** Skip the portal exit when a full-page view replaces the workbench. */
@@ -55,6 +73,10 @@ export interface UserMenuProps {
   account: AccountStatus | null;
   activeProvider: CustomProvider | null;
   accountBusy: boolean;
+  /** Official SuperGrok quota card at the top of the sheet. */
+  officialQuota?: UserMenuOfficialQuota | null;
+  /** DeepSeek (etc.) balance card at the top of the sheet. */
+  providerBalance?: UserMenuProviderBalance | null;
   /** Re-open the current version's update notes. */
   onWhatsNew?: () => void;
   /** Open optional in-app product tour */
@@ -114,6 +136,8 @@ export function UserMenu({
   account,
   activeProvider,
   accountBusy,
+  officialQuota = null,
+  providerBalance = null,
   onWhatsNew,
   onTutorial,
   onTheme,
@@ -317,6 +341,82 @@ export function UserMenu({
             role="menu"
             style={style}
           >
+            {officialQuota ? (
+              <div className="user-menu__quota" data-testid="user-menu-quota">
+                <div className="user-menu__quota-row">
+                  <span className="user-menu__tier">{officialQuota.plan}</span>
+                  {officialQuota.resetText ? (
+                    <span className="user-menu__quota-reset">
+                      {officialQuota.resetText}
+                    </span>
+                  ) : null}
+                </div>
+                {officialQuota.remainLabel != null ||
+                officialQuota.usedPercent != null ? (
+                  <div className="user-menu__quota-meter">
+                    {officialQuota.usedPercent != null ? (
+                      <div
+                        className="account-quota-bar account-quota-bar--sm"
+                        aria-hidden
+                      >
+                        <div
+                          className={
+                            "account-quota-bar__fill" +
+                            officialQuota.barFillClass
+                          }
+                          style={{
+                            width: `${Math.min(100, officialQuota.usedPercent)}%`,
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    {officialQuota.remainLabel ? (
+                      <span
+                        className={
+                          "user-menu__remain" +
+                          (officialQuota.remainLow ? " is-low" : "")
+                        }
+                      >
+                        {officialQuota.remainLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {providerBalance ? (
+              <div
+                className="user-menu__balance"
+                data-testid="user-menu-balance"
+              >
+                {providerBalance.line ? (
+                  <span className="user-menu__balance-detail">
+                    {providerBalance.line}
+                  </span>
+                ) : null}
+                {providerBalance.error ? (
+                  <span className="user-menu__balance-err">
+                    {providerBalance.error}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="user-menu__balance-refresh"
+                  disabled={providerBalance.busy}
+                  onClick={() => providerBalance.onRefresh()}
+                >
+                  {providerBalance.busy
+                    ? providerBalance.refreshingLabel
+                    : providerBalance.refreshLabel}
+                </button>
+              </div>
+            ) : null}
+
+            {officialQuota || providerBalance ? (
+              <div className="user-menu__sep" role="separator" />
+            ) : null}
+
             {onWhatsNew && labels.whatsNew ? (
               <button
                 type="button"

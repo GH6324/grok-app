@@ -71,19 +71,19 @@ See `docs/llm-wiki/release.md`.
 
 ### Changed
 - Sent quotes show the excerpt and comment in the bubble, not a notes chip.
+- Account quota sits in the user menu again, with remaining % beside the name.
 - Streaming chat, heatmap hover, and SSH sidebar refresh do less re-rendering (#1073).
 - Default workspace uses a house icon in the sidebar and composer (#1069).
 - Sidebar Other now uses the same name as the composer chip: Default workspace (#1067).
 - Startup skips TipTap and markdown preloads; Office and Settings load on demand (#1055, #1063).
-- Expanded sidebar pins remaining SuperGrok quota without opening the account menu (#1048). Settings is a footer gear; the account menu keeps theme and sign-in.
 
 **中文 · 变更**
 - 发送后的引用在气泡里直接显示摘录和评论，不再收成「N 条注释」。
+- 额度卡片回到用户菜单顶部，名字旁显示剩余百分比。
 - 流式对话、热力图像悬停与 SSH 侧栏刷新减少无效重渲染（#1073）。
 - 默认工作区在侧栏和输入框改用小房子图标（#1069）。
 - 侧栏「其他会话」与输入框统一为「默认工作区」（#1067）。
 - 启动不再预载 TipTap / markdown；Office 与设置页按需加载（#1055、#1063）。
-- 展开左边栏即可看到 SuperGrok 剩余额度，不必再点开账户菜单（#1048）。设置改为脚注齿轮；账户菜单只留主题和登录。
 
 ## [0.2.33] - 2026-09-06
 

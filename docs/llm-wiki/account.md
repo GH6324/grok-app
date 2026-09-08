@@ -6,9 +6,8 @@ Product rules for **official login, membership, quota, and usage** in Grok App.
 
 1. Sign in with the **same** Grok Build CLI auth (`grok login`), not a parallel OAuth stack.
 2. Show account + membership at two depths:
-   - **Expanded sidebar pin**: plan + reset on the first row; quota bar + remaining % (or custom balance) on the second. No avatar / display name. Click opens Account settings. Signed-out / local has no pin.
-   - **Sidebar footer**: identity opens the user menu; settings gear on the right.
-   - **User menu sheet** (identity click): what's new, tour, theme, login/logout. Quota and Settings are not in this menu — pin + footer gear cover them. Switch accounts in Settings → Account.
+   - **Sidebar footer identity**: avatar + display name + **compact remain** (SuperGrok remaining `%`, or DeepSeek / balance-capable custom `total CURRENCY`). Whole row opens the user menu. Signed-out / unsupported custom has no remain chip. Settings gear stays on the right.
+   - **User menu sheet** (identity click): **full quota or provider-balance card at the top** (plan + reset + bar / balance + refresh), then what's new, tour, theme, login/logout. Switch accounts in Settings → Account.
    - **Settings → Account**: full profile, subscription, quota, token activity heatmap, recent session call logs, CLI path, Doctor.
 3. Never log tokens, API keys, or `auth.json` secrets (redact).
 

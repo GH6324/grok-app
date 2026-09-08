@@ -177,14 +177,18 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
     account,
     accountBusy,
     providerBalanceCache,
+    providerBalanceBusy,
+    providerBalanceError,
+    loadProviderBalance,
     applyThemeChoice,
     onSettings,
-    onAccountSettings,
     onTutorial,
     onLogin,
     onLogout,
     onUserMenuOpened,
   } = props;
+  // Account deep-link stays on Settings gear / Account section (no footer pin).
+  void props.onAccountSettings;
 
   const providerSupportsBalance =
     !!activeCustomProvider &&
@@ -407,60 +411,6 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
         {children}
 
         <div className="sidebar__account">
-          {pinQuota ? (
-            <button
-              type="button"
-              className="sidebar__quota-pin"
-              aria-label={
-                [pinPlan, pinRemain, pinResetText]
-                  .filter(Boolean)
-                  .join(", ")
-              }
-              onClick={onAccountSettings}
-            >
-              <span className="sidebar__quota-pin__row">
-                <span className="sidebar__quota-pin__plan">{pinPlan}</span>
-                {pinResetText ? (
-                  <span className="sidebar__quota-pin__reset">
-                    {pinResetText}
-                  </span>
-                ) : null}
-              </span>
-              {pinRemain ||
-              (!customRouteActive &&
-                livePercents.remainingPercent != null) ? (
-                <span className="sidebar__quota-pin__meter">
-                  {!customRouteActive &&
-                  livePercents.remainingPercent != null ? (
-                    <div
-                      className="account-quota-bar account-quota-bar--sm"
-                      aria-hidden
-                    >
-                      <div
-                        className={
-                          "account-quota-bar__fill" +
-                          quotaBarFillClass(livePercents.usedPercent)
-                        }
-                        style={{
-                          width: `${Math.min(100, livePercents.usedPercent ?? 0)}%`,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                  {pinRemain ? (
-                    <span
-                      className={
-                        "sidebar__quota-pin__remain" +
-                        (remainLow ? " is-low" : "")
-                      }
-                    >
-                      {pinRemain}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-            </button>
-          ) : null}
           <div className="sidebar__footer-row">
             <UserMenu
               open={showUserMenu}
@@ -471,6 +421,32 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
               account={account}
               activeProvider={activeCustomProvider}
               accountBusy={accountBusy}
+              officialQuota={
+                signedInOfficial
+                  ? {
+                      plan: pinPlan,
+                      resetText: pinResetText,
+                      remainLabel: remainLabel,
+                      usedPercent: livePercents.usedPercent,
+                      remainLow,
+                      barFillClass: quotaBarFillClass(
+                        livePercents.usedPercent,
+                      ),
+                    }
+                  : null
+              }
+              providerBalance={
+                customRouteActive && providerSupportsBalance
+                  ? {
+                      line: pinRemain,
+                      busy: providerBalanceBusy,
+                      error: providerBalanceError,
+                      refreshLabel: tr("prov.balance.refresh"),
+                      refreshingLabel: tr("prov.balance.checking"),
+                      onRefresh: () => loadProviderBalance({ force: true }),
+                    }
+                  : null
+              }
               labels={{
                 whatsNew: tr("whatsNew.menu"),
                 tutorial: tr("tutorial.menu"),
@@ -503,6 +479,7 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
                   className={
                     "sidebar__footer" + (showUserMenu ? " is-open" : "")
                   }
+                  aria-label={tr("user.menu")}
                   aria-haspopup="menu"
                   aria-expanded={showUserMenu}
                   onClick={() => {
@@ -553,6 +530,19 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
                     <span className="user-meta__name">
                       {customRouteActive ? customName : officialName}
                     </span>
+                    {pinQuota &&
+                    (pinRemain ||
+                      (providerSupportsBalance && providerBalanceBusy)) ? (
+                      <span
+                        className={
+                          "sidebar__footer-remain" +
+                          (remainLow ? " is-low" : "")
+                        }
+                      >
+                        {pinRemain ??
+                          (providerBalanceBusy ? "…" : null)}
+                      </span>
+                    ) : null}
                   </div>
                 </button>
               </Tip>
