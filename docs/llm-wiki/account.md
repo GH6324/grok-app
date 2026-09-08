@@ -36,6 +36,17 @@ Host **must** sync `auth.json` into agent-home on login and before each ACP spaw
 
 **Unsigned-in official route:** if `read_auth_profile().signed_in` is false (no `auth.json`, or no usable `key` / `access_token` / `refresh_token`), **do not** send `authenticate(cached_token)`. The CLI has nothing to load; the RPC waits 12s, retries once after a no-op re-sync, then soft-fails (~24s of ERROR logs) while the workbench still opens idle. This is **not** the #528 “logged in but agent-home missing token” path — that still authenticates, re-syncs `~/.grok` → agent-home, and retries once. An official API key / keychain key is not a cached token and must not trigger this RPC.
 
+### Auth mirror heal (independent mode)
+
+Login writes **`~/.grok/auth.json`**. Independent mode also mirrors into App `agent-home/auth.json` via `sync_cli_auth_to_agent_home`.
+
+If a CLI subprocess deletes `~/.grok/auth.json` (AuthManager “scope removed / file deleted”) while the agent-home mirror is still signed-in, Host must:
+
+1. **Read** login + billing token from the best of: `$GROK_HOME/auth.json` (if present) · `~/.grok/auth.json` · App `agent-home/auth.json`
+2. **Heal**: copy agent-home → `~/.grok/auth.json` when canonical is missing and the mirror is signed-in
+
+Otherwise the UI shows signed-out / skips `cached_token` even though independent-mode agents still hold credentials.
+
 ### Warm process recycle after auth change
 
 Syncing the file is not enough while multi-session **parked** / **prewarm** CLI processes still hold credentials loaded at spawn time. Connect prefers a Ready prewarm when policy/effort/route match.
@@ -53,7 +64,8 @@ Syncing the file is not enough while multi-session **parked** / **prewarm** CLI 
 
 | Failure mode | Fix |
 |--------------|-----|
-| agent-home empty/stale after custom route, UI reads it as signed-out | `read_auth_profile` prefers **better** of agent-home vs `~/.grok` (signed-in → refresh → not expired → canonical) |
+| agent-home empty/stale after custom route, UI reads it as signed-out | `read_auth_profile` prefers **better** of `$GROK_HOME` / `~/.grok` / App agent-home (signed-in → refresh → not expired) |
+| `~/.grok/auth.json` wiped but agent-home mirror still signed-in | Rank mirrors for status + token; heal by copying agent-home → `~/.grok` |
 | mtime-only sync skipped restore of good `~/.grok` over newer empty agent-home | `sync_cli_auth_to_agent_home` compares **bytes** |
 | Process reuse gate used `is_custom_provider_id(modelId)` — custom sessions store **upstream** model ids, so custom processes looked "official" and were reused after auth strip | Store `custom_route` on `AcpClient` at spawn from `active_route()`; gate uses that |
 | Warm reuse skipped `prepare_route_auth` | Connect warm path re-runs `prepare_route_auth_for_agent` before `session/load` |
