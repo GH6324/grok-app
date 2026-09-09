@@ -37,11 +37,19 @@ export type WallpaperGalleryItem = {
 export type WallpaperSearchResult = {
   meta?: {
     requestId?: string | null;
+    requestedMode?: "cli" | "responses_preview" | "auto" | string;
     routeUsed: "cli" | "responses";
     fallbackReason?: string | null;
     durationMs: number;
+    responsesDurationMs?: number | null;
+    cliDurationMs?: number | null;
     cacheHit?: boolean;
     continuationId?: string | null;
+    searchCalls?: number | null;
+    candidateCount?: number;
+    validCount?: number;
+    model?: string | null;
+    effort?: string | null;
   } | null;
   items: WallpaperGalleryItem[];
   errorCode?: string | null;
@@ -97,6 +105,21 @@ export type WallpaperLibraryPurpose =
   | "favorites"
   | "generated"
   | "cache";
+
+/** Compare local paths without making POSIX paths case-insensitive. */
+export function sameWallpaperLocalPath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalize = (value: string | null | undefined) => {
+    const path = value?.trim().replace(/\\/g, "/") ?? "";
+    return /^[a-z]:\//i.test(path) || path.startsWith("//")
+      ? path.toLowerCase()
+      : path;
+  };
+  const normalizedLeft = normalize(left);
+  return normalizedLeft.length > 0 && normalizedLeft === normalize(right);
+}
 
 export type WallpaperSourceErrorCode =
   | "catalog_write_failed"
