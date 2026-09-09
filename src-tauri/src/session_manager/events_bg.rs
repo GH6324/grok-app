@@ -135,6 +135,7 @@ impl SessionManager {
                 authoritative,
             } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let finished = {
                     let mut bg = self.background.lock();
                     if let Some(s) = bg.get_mut(app_session_id) {
@@ -152,8 +153,8 @@ impl SessionManager {
                             // Keep turn open while tools still running (long find / subagent).
                             match Self::try_finish_deferred_prompt_complete(
                                 s,
-                                Some(app),
                                 Some(&mut pending_emits),
+                                Some(&mut pending_persists),
                             ) {
                                 None => {
                                     tracing::info!(
@@ -171,6 +172,7 @@ impl SessionManager {
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 if finished {
                     self.promote_background_ready_to_parked(app_session_id);
                     Self::emit_runtime(
@@ -410,6 +412,7 @@ impl SessionManager {
                     live_title
                 };
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let (
                     app_sid,
                     project_path,
@@ -441,10 +444,10 @@ impl SessionManager {
                         };
                         s.tools_this_turn = s.tools_this_turn.saturating_add(1);
                         let finished = Self::try_finish_deferred_prompt_complete(
-                            s,
-                            Some(app),
-                            Some(&mut pending_emits),
-                        )
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            )
                         .is_some();
                         let st = if status.is_empty() {
                             "in_progress".to_string()
@@ -499,6 +502,7 @@ impl SessionManager {
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 if let Some(job) = journal_job {
                     schedule_completed_tool_journal_persist(job);
                 }
@@ -553,6 +557,7 @@ impl SessionManager {
             }
             AcpEvent::ToolOpenReleased { tool_call_id } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let finished = {
                     let mut bg = self.background.lock();
                     if let Some(s) = bg.get_mut(app_session_id) {
@@ -562,16 +567,17 @@ impl SessionManager {
                         Self::release_tool_open_on_session(s, &tool_call_id);
                         Self::touch_stream_progress_locked(s);
                         Self::try_finish_deferred_prompt_complete(
-                            s,
-                            Some(app),
-                            Some(&mut pending_emits),
-                        )
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            )
                         .is_some()
                     } else {
                         false
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 if finished {
                     self.promote_background_ready_to_parked(app_session_id);
                     Self::emit_runtime(
@@ -594,6 +600,7 @@ impl SessionManager {
                 self.pending_soft_respawn.lock().remove(app_session_id);
                 let mut gate_invalidations: Vec<serde_json::Value> = Vec::new();
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let runtime_snap = {
                     let mut bg = self.background.lock();
                     if let Some(mut s) = bg.remove(app_session_id) {
@@ -602,18 +609,26 @@ impl SessionManager {
                         if let Some(p) = Self::take_pending_stream_emit(&mut s) {
                             pending_emits.push(p);
                         }
-                        Self::maybe_flush_stream_journal(&mut s, true, false);
                         let busy = Self::live_session_is_busy(&s)
                             || matches!(
                                 s.fsm.state(),
                                 SessionState::Streaming | SessionState::AwaitingPermission
                             );
                         if busy {
-                            Self::journal_turn_cancelled(&mut s, Some(app), "agent_exit");
+                            if let Some(boundary) =
+                                Self::prepare_journal_turn_cancelled(&mut s, "agent_exit")
+                            {
+                                pending_persists
+                                    .push(PendingSessionPersist::TurnBoundary(boundary));
+                            }
                             tracing::warn!(
                                 "background agent process exited mid-turn sid={}",
                                 s.app_session_id
                             );
+                        } else if let Some(flush) =
+                            Self::prepare_stream_journal_flush(&mut s, true, false)
+                        {
+                            pending_persists.push(PendingSessionPersist::StreamJournal(flush));
                         }
                         if let Some(row) = Self::take_pending_gate_invalidation(&mut s) {
                             crate::plan_chrome::mark_gate_stale(&s.app_session_id);
@@ -643,6 +658,7 @@ impl SessionManager {
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 if let Some(snap) = runtime_snap {
                     Self::emit_runtime(app, &snap);
                 }
@@ -651,14 +667,18 @@ impl SessionManager {
             }
             AcpEvent::Error { error } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 {
                     let mut bg = self.background.lock();
                     if let Some(s) = bg.get_mut(app_session_id) {
-                        Self::record_turn_error(s, app, &error, &mut pending_emits);
+                        pending_persists.push(PendingSessionPersist::TurnBoundary(
+                        Self::prepare_turn_error(s, &error, &mut pending_emits),
+                    ));
                         let _ = s.fsm.fail_with(error);
                     }
                 }
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 self.promote_background_ready_to_parked(app_session_id);
                 Self::emit_state(app, &self.snapshot());
             }
@@ -880,6 +900,7 @@ impl SessionManager {
                 );
                 if abort {
                     let mut pending_emits = Vec::new();
+                    let mut pending_persists = Vec::new();
                     let (acp, agent_sid) = {
                         let mut bg = self.background.lock();
                         if let Some(s) = bg.get_mut(app_session_id) {
@@ -888,7 +909,9 @@ impl SessionManager {
                             } else {
                                 s.provider_retry_aborted = true;
                                 let err = provider_retry_abort_error(attempt, cap, &reason);
-                                Self::record_turn_error(s, app, &err, &mut pending_emits);
+                                pending_persists.push(PendingSessionPersist::TurnBoundary(
+                                Self::prepare_turn_error(s, &err, &mut pending_emits),
+                            ));
                                 let _ = s.fsm.fail_with(err);
                                 (s.acp.clone(), s.meta.agent_session_id.clone())
                             }
@@ -897,6 +920,7 @@ impl SessionManager {
                         }
                     };
                     Self::emit_stream_payloads(app, pending_emits);
+                    Self::commit_session_persists(Some(app), pending_persists);
                     if let Some(acp) = acp {
                         let abort_msg = provider_retry_abort_rpc_message(&reason);
                         acp.abort_pending_prompts(&abort_msg);

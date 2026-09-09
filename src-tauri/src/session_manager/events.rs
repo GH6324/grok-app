@@ -268,6 +268,7 @@ impl SessionManager {
                 authoritative,
             } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let empty_run = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -289,8 +290,8 @@ impl SessionManager {
                             // are still open — agent often fires prompt_complete early.
                             match Self::try_finish_deferred_prompt_complete(
                                 s,
-                                Some(app),
                                 Some(&mut pending_emits),
+                                Some(&mut pending_persists),
                             ) {
                                 None => {
                                     tracing::info!(
@@ -310,6 +311,7 @@ impl SessionManager {
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 Self::emit_state(app, &self.snapshot());
                 Self::emit_empty_run_if_any(app, empty_run);
             }
@@ -406,6 +408,7 @@ impl SessionManager {
                             Some(&title),
                         );
                         let mut pending_emits = Vec::new();
+                        let mut pending_persists = Vec::new();
                         let empty = {
                             let mut guard = self.inner.lock();
                             if let Some(s) = guard.as_mut() {
@@ -413,16 +416,17 @@ impl SessionManager {
                                     let _ = s.fsm.permission_resolved_continue();
                                 }
                                 Self::try_finish_deferred_prompt_complete(
-                                    s,
-                                    Some(app),
-                                    Some(&mut pending_emits),
-                                )
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            )
                                 .flatten()
                             } else {
                                 None
                             }
                         };
                         Self::emit_stream_payloads(app, pending_emits);
+                        Self::commit_session_persists(Some(app), pending_persists);
                         Self::emit_empty_run_if_any(app, empty);
                     }
                 } else if auto_deny {
@@ -440,6 +444,7 @@ impl SessionManager {
                             Some(&title),
                         );
                         let mut pending_emits = Vec::new();
+                        let mut pending_persists = Vec::new();
                         let empty = {
                             let mut guard = self.inner.lock();
                             if let Some(s) = guard.as_mut() {
@@ -447,16 +452,17 @@ impl SessionManager {
                                     let _ = s.fsm.permission_resolved_continue();
                                 }
                                 Self::try_finish_deferred_prompt_complete(
-                                    s,
-                                    Some(app),
-                                    Some(&mut pending_emits),
-                                )
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            )
                                 .flatten()
                             } else {
                                 None
                             }
                         };
                         Self::emit_stream_payloads(app, pending_emits);
+                        Self::commit_session_persists(Some(app), pending_persists);
                         Self::emit_empty_run_if_any(app, empty);
                     }
                 } else {
@@ -623,6 +629,7 @@ impl SessionManager {
                 }
 
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let (app_sid, project_path, empty_run, open_changed, already_terminal) = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -638,10 +645,10 @@ impl SessionManager {
                         s.tools_this_turn = s.tools_this_turn.saturating_add(1);
                         // Tools settled → apply deferred prompt_complete if any (#52).
                         let finished = Self::try_finish_deferred_prompt_complete(
-                            s,
-                            Some(app),
-                            Some(&mut pending_emits),
-                        );
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            );
                         (
                             s.app_session_id.clone(),
                             s.project_path.clone(),
@@ -654,6 +661,7 @@ impl SessionManager {
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 Self::emit_empty_run_if_any(app, empty_run.clone().flatten());
                 // Live ToolCall used to flatten away Some(None)=finished, so
                 // Ready never reached the UI and the composer stayed on Stop.
@@ -815,6 +823,7 @@ impl SessionManager {
             }
             AcpEvent::ToolOpenReleased { tool_call_id } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 let empty_run = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -825,16 +834,17 @@ impl SessionManager {
                         // Progress without re-arming a false open tool.
                         Self::touch_stream_progress_locked(s);
                         Self::try_finish_deferred_prompt_complete(
-                            s,
-                            Some(app),
-                            Some(&mut pending_emits),
-                        )
+                                s,
+                                Some(&mut pending_emits),
+                                Some(&mut pending_persists),
+                            )
                         .flatten()
                     } else {
                         None
                     }
                 };
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 Self::emit_empty_run_if_any(app, empty_run);
                 Self::emit_state(app, &self.snapshot());
             }
@@ -919,11 +929,14 @@ impl SessionManager {
             }
             AcpEvent::Error { error } => {
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
                         if !s.provider_retry_aborted {
-                            Self::record_turn_error(s, app, &error, &mut pending_emits);
+                            pending_persists.push(PendingSessionPersist::TurnBoundary(
+                            Self::prepare_turn_error(s, &error, &mut pending_emits),
+                        ));
                         } else {
                             // Retry path already recorded the error; still drop busy
                             // markers so reconnect is not stuck Disconnected+busy.
@@ -933,11 +946,13 @@ impl SessionManager {
                     }
                 }
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 Self::emit_state(app, &self.snapshot());
             }
             AcpEvent::ProcessExited { code } => {
                 let mut gate_invalidations: Vec<serde_json::Value> = Vec::new();
                 let mut pending_emits = Vec::new();
+                let mut pending_persists = Vec::new();
                 {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -948,7 +963,6 @@ impl SessionManager {
                         if let Some(p) = Self::take_pending_stream_emit(s) {
                             pending_emits.push(p);
                         }
-                        Self::maybe_flush_stream_journal(s, true, false);
                         let st = s.fsm.state();
                         // Busy includes pending plan / ask_user (not only Streaming FSM).
                         let was_busy = Self::live_session_is_busy(s)
@@ -957,7 +971,16 @@ impl SessionManager {
                                 SessionState::Streaming | SessionState::AwaitingPermission
                             );
                         if was_busy {
-                            Self::journal_turn_cancelled(s, Some(app), "agent_exit");
+                            if let Some(boundary) =
+                                Self::prepare_journal_turn_cancelled(s, "agent_exit")
+                            {
+                                pending_persists
+                                    .push(PendingSessionPersist::TurnBoundary(boundary));
+                            }
+                        } else if let Some(flush) =
+                            Self::prepare_stream_journal_flush(s, true, false)
+                        {
+                            pending_persists.push(PendingSessionPersist::StreamJournal(flush));
                         }
                         // Drop human gates so UI cannot Approve into a dead process.
                         if let Some(row) = Self::take_pending_gate_invalidation(s) {
@@ -986,6 +1009,7 @@ impl SessionManager {
                     }
                 }
                 Self::emit_stream_payloads(app, pending_emits);
+                Self::commit_session_persists(Some(app), pending_persists);
                 // Also drop any parked entry with this process id (defensive).
                 self.parked.lock().retain(|_, p| p.process_id != process_id);
                 Self::emit_gates_invalidated(app, "agent_exit", gate_invalidations);
@@ -1130,6 +1154,7 @@ impl SessionManager {
 
                 if abort {
                     let mut pending_emits = Vec::new();
+                    let mut pending_persists = Vec::new();
                     let (acp, agent_sid) = {
                         let mut guard = self.inner.lock();
                         if let Some(s) = guard.as_mut() {
@@ -1144,7 +1169,9 @@ impl SessionManager {
                                 // Terminal quota uses QuotaExceeded + the CLI sentence.
                                 let err = provider_retry_abort_error(attempt, cap, &reason);
                                 // Chat-visible error row (must happen before clearing stream ids)
-                                Self::record_turn_error(s, app, &err, &mut pending_emits);
+                                pending_persists.push(PendingSessionPersist::TurnBoundary(
+                                Self::prepare_turn_error(s, &err, &mut pending_emits),
+                            ));
                                 let _ = s.fsm.fail_with(err);
                                 (s.acp.clone(), s.meta.agent_session_id.clone())
                             }
@@ -1153,6 +1180,7 @@ impl SessionManager {
                         }
                     };
                     Self::emit_stream_payloads(app, pending_emits);
+                    Self::commit_session_persists(Some(app), pending_persists);
                     if let Some(acp) = acp {
                         let abort_msg = provider_retry_abort_rpc_message(&reason);
                         acp.abort_pending_prompts(&abort_msg);

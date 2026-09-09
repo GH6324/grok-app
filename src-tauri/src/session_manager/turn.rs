@@ -508,6 +508,7 @@ impl SessionManager {
                     // the wrong chat.
                     let mut record_error = false;
                     let mut pending_emits = Vec::new();
+                    let mut pending_persists = Vec::new();
                     mgr.with_session_mut(&turn_sid, |s| {
                         // The RPC failed, so no authoritative PromptComplete will
                         // arrive. Release the turn or the chat stays un-parkable
@@ -524,12 +525,15 @@ impl SessionManager {
                         }
                         // Skip if host already recorded a retry-exhausted error this turn.
                         if !s.provider_retry_aborted {
-                            SessionManager::record_turn_error(s, &app2, &e, &mut pending_emits);
+                            pending_persists.push(PendingSessionPersist::TurnBoundary(
+                            SessionManager::prepare_turn_error(s, &e, &mut pending_emits),
+                        ));
                             let _ = s.fsm.fail_with(e);
                             record_error = true;
                         }
                     });
                     SessionManager::emit_stream_payloads(&app2, pending_emits);
+                    SessionManager::commit_session_persists(Some(&app2), pending_persists);
                     if record_error {
                         mgr.emit_for_session(&app2, &turn_sid);
                     }
@@ -547,6 +551,7 @@ impl SessionManager {
                     // while the agent turn already ended (journal may hold body).
                     let mut need_emit = false;
                     let mut pending_emits = Vec::new();
+                    let mut pending_persists = Vec::new();
                     mgr.with_session_mut(&turn_sid, |s| {
                         // Only heal sticky *Streaming* here — leave
                         // AwaitingPermission alone (user gate still live).
@@ -562,10 +567,10 @@ impl SessionManager {
                                 s.deferred_prompt_complete = Some("end_turn".into());
                             }
                             need_emit = SessionManager::try_finish_deferred_prompt_complete(
-                                s,
-                                Some(&app2),
-                                Some(&mut pending_emits),
-                            )
+                            s,
+                            Some(&mut pending_emits),
+                            Some(&mut pending_persists),
+                        )
                             .is_some();
                         } else if sticky_streaming {
                             tracing::warn!(
@@ -577,10 +582,10 @@ impl SessionManager {
                                 s.deferred_prompt_complete = Some("end_turn".into());
                             }
                             need_emit = SessionManager::try_finish_deferred_prompt_complete(
-                                s,
-                                Some(&app2),
-                                Some(&mut pending_emits),
-                            )
+                            s,
+                            Some(&mut pending_emits),
+                            Some(&mut pending_persists),
+                        )
                             .is_some();
                             // If gates still block finish, at least drop busy so
                             // reconnect/send are not wedged forever.
@@ -610,6 +615,7 @@ impl SessionManager {
                         }
                     });
                     SessionManager::emit_stream_payloads(&app2, pending_emits);
+                    SessionManager::commit_session_persists(Some(&app2), pending_persists);
                     if need_emit {
                         mgr.emit_for_session(&app2, &turn_sid);
                     }
@@ -869,13 +875,12 @@ impl SessionManager {
             self.emit_for_session(&app, &target);
             return Ok(self.snapshot());
         }
-        let app_for_marker = app.clone();
         // Also release ask_user / plan reverse-RPCs. Leaving them set kept
         // `live_session_is_busy` true after stop, so Send/park paths stayed
         // wedged until process kill (user diag 5bda6b52).
+        let mut pending_persists = Vec::new();
         let (acp, agent_sid, pending_ask, pending_plan, pending_perm) = self
-            .with_session_mut(&target, move |s| {
-                let app = app_for_marker;
+            .with_session_mut(&target, |s| {
                 if let Some(h) = s.mock_stream.take() {
                     h.request_stop();
                 }
@@ -896,7 +901,9 @@ impl SessionManager {
                 // Journal a cancel marker so UI history is not left as user-only silence.
                 if was_busy {
                     // Shared helper: durable chip + live emit (history matches live).
-                    Self::journal_turn_cancelled(s, Some(&app), "user_stop");
+                    if let Some(boundary) = Self::prepare_journal_turn_cancelled(s, "user_stop") {
+                        pending_persists.push(PendingSessionPersist::TurnBoundary(boundary));
+                    }
                     if s.fsm.state() == SessionState::Streaming
                         || s.fsm.state() == SessionState::AwaitingPermission
                     {
@@ -928,6 +935,7 @@ impl SessionManager {
                 )
             })
             .ok_or("no active session")?;
+        Self::commit_session_persists(Some(&app), pending_persists);
         let had_pending_ask = pending_ask.is_some();
         if had_pending_ask {
             let _ = app.emit(

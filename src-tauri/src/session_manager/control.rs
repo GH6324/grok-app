@@ -937,6 +937,7 @@ impl SessionManager {
 
         // Success path only: clear pending, cache session-allow, leave AwaitingPermission.
         let mut pending_emits = Vec::new();
+        let mut pending_persists = Vec::new();
         let empty_run = self
             .with_session_mut(&target, |s| {
                 if s.pending_permission_rpc_id == Some(rpc_id) {
@@ -952,11 +953,12 @@ impl SessionManager {
                     let _ = s.fsm.permission_resolved_continue();
                 }
                 // Permission cleared — may finish a deferred prompt_complete (#52).
-                Self::try_finish_deferred_prompt_complete(s, Some(&app), Some(&mut pending_emits))
+                Self::try_finish_deferred_prompt_complete(s, Some(&mut pending_emits), Some(&mut pending_persists))
                     .flatten()
             })
             .flatten();
         Self::emit_stream_payloads(&app, pending_emits);
+        Self::commit_session_persists(Some(&app), pending_persists);
 
         // Cross-session permission audit (user decision). Soft-fail.
         crate::audit_ledger::record_permission_resolve(
@@ -1050,16 +1052,18 @@ impl SessionManager {
         let acp = acp.ok_or_else(|| "ACP client missing".to_string())?;
         acp.respond_exit_plan_mode(id, &decision, feedback).await?;
         let mut pending_emits = Vec::new();
+        let mut pending_persists = Vec::new();
         let empty_run = self
             .with_session_mut(&target, |s| {
                 if s.pending_plan_rpc_id == Some(id) || rpc_id == Some(id) {
                     s.pending_plan_rpc_id = None;
                 }
-                Self::try_finish_deferred_prompt_complete(s, Some(&app), Some(&mut pending_emits))
+                Self::try_finish_deferred_prompt_complete(s, Some(&mut pending_emits), Some(&mut pending_persists))
                     .flatten()
             })
             .flatten();
         Self::emit_stream_payloads(&app, pending_emits);
+        Self::commit_session_persists(Some(&app), pending_persists);
         self.emit_for_session(&app, &target);
         Self::emit_empty_run_if_any(&app, empty_run);
         Ok(self.snapshot())
@@ -1096,16 +1100,18 @@ impl SessionManager {
         };
         acp.respond_ask_user_question(id, outcome).await?;
         let mut pending_emits = Vec::new();
+        let mut pending_persists = Vec::new();
         let empty_run = self
             .with_session_mut(&target, |s| {
                 if s.pending_ask_user_rpc_id == Some(id) || rpc_id == Some(id) {
                     s.pending_ask_user_rpc_id = None;
                 }
-                Self::try_finish_deferred_prompt_complete(s, Some(&app), Some(&mut pending_emits))
+                Self::try_finish_deferred_prompt_complete(s, Some(&mut pending_emits), Some(&mut pending_persists))
                     .flatten()
             })
             .flatten();
         Self::emit_stream_payloads(&app, pending_emits);
+        Self::commit_session_persists(Some(&app), pending_persists);
         self.emit_for_session(&app, &target);
         Self::emit_empty_run_if_any(&app, empty_run);
         Ok(self.snapshot())

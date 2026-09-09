@@ -419,7 +419,7 @@ pub(crate) fn prefer_auth_profile_among(
 
 /// If canonical `~/.grok/auth.json` is missing but App agent-home still has a
 /// signed-in mirror, copy agent-home → canonical (best-effort).
-fn heal_cli_auth_from_agent_home_if_needed() -> Result<(), String> {
+pub(super) fn heal_cli_auth_from_agent_home_if_needed() -> Result<(), String> {
     let canonical = cli_default_auth_json_path();
     if canonical.is_file() {
         return Ok(());

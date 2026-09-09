@@ -89,8 +89,13 @@ impl BuildOauthTokenError {
 /// independent agent home must never redirect the official wallpaper side
 /// route to different credentials. Tokens expiring within 60 seconds are
 /// rejected so a long-running search does not start with a stale credential.
+///
+/// If canonical `~/.grok/auth.json` was wiped but the App agent-home mirror is
+/// still signed in, heal that file first (same as profile reads) so wallpaper
+/// Responses / X search do not fail closed with `oauth_unavailable`.
 pub(crate) fn read_build_oauth_access_token() -> Result<BuildOauthAccessToken, BuildOauthTokenError>
 {
+    let _ = super::heal_cli_auth_from_agent_home_if_needed();
     read_build_oauth_access_token_from_path_at(&cli_default_auth_json_path(), Utc::now())
 }
 

@@ -54,44 +54,48 @@ impl SessionManager {
         let now = Instant::now();
 
         // Heal live focus slot.
-        let (live_action, live_emits) = {
+        let (live_action, live_emits, live_persists) = {
             let mut pending_emits = Vec::new();
+            let mut pending_persists = Vec::new();
             let mut guard = self.inner.lock();
             let action = guard.as_mut().and_then(|s| {
                 Self::tick_stream_stall_on_session(
                     s,
-                    Some(app),
                     Some(&mut pending_emits),
+                    Some(&mut pending_persists),
                     stall_secs,
                     now,
                 )
             });
-            (action, pending_emits)
+            (action, pending_emits, pending_persists)
         };
         Self::emit_stream_payloads(app, live_emits);
+        Self::commit_session_persists(Some(app), live_persists);
         self.apply_stall_tick_action(app, live_action);
 
         // Background busy turns: silent heal only. Soft banners still emit so
         // the user sees Keep waiting / End turn when they view that chat — we
         // never force-end a user task just because it is not focused.
-        let (bg_actions, bg_emits) = {
+        let (bg_actions, bg_emits, bg_persists) = {
             let mut pending_emits = Vec::new();
+            let mut pending_persists = Vec::new();
             let mut bg = self.background.lock();
             let actions: Vec<StallTickAction> = bg
                 .values_mut()
                 .filter_map(|s| {
                     Self::tick_stream_stall_on_session(
                         s,
-                        Some(app),
                         Some(&mut pending_emits),
+                        Some(&mut pending_persists),
                         stall_secs,
                         now,
                     )
                 })
                 .collect();
-            (actions, pending_emits)
+            (actions, pending_emits, pending_persists)
         };
         Self::emit_stream_payloads(app, bg_emits);
+        Self::commit_session_persists(Some(app), bg_persists);
         for a in bg_actions {
             self.apply_stall_tick_action(app, Some(a));
         }
@@ -100,8 +104,8 @@ impl SessionManager {
     /// Per-session stall tick decision (mutates session when healing).
     pub(super) fn tick_stream_stall_on_session(
         s: &mut LiveSession,
-        app: Option<&AppHandle>,
         mut pending_emits: Option<&mut Vec<StreamEmitPayload>>,
+        mut pending_persists: Option<&mut Vec<PendingSessionPersist>>,
         stall_secs: u32,
         now: Instant,
     ) -> Option<StallTickAction> {
@@ -120,8 +124,10 @@ impl SessionManager {
         // Normal mid-turn tools (journal not terminal, still young) are not pruned.
         #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
         let emits = pending_emits.as_mut().map(|v| &mut **v);
+        #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
+        let persists = pending_persists.as_mut().map(|v| &mut **v);
         if s.deferred_prompt_complete.is_some()
-            && Self::heal_stuck_streaming_turn(s, app, emits, now)
+            && Self::heal_stuck_streaming_turn(s, emits, persists, now)
         {
             return Some(StallTickAction::Healed {
                 session_id: s.app_session_id.clone(),
@@ -145,7 +151,9 @@ impl SessionManager {
         // 1) Silent heal (orphan tools + deferred complete + ready-eligible).
         #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
         let emits = pending_emits.as_mut().map(|v| &mut **v);
-        if Self::heal_stuck_streaming_turn(s, app, emits, now) {
+        #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
+        let persists = pending_persists.as_mut().map(|v| &mut **v);
+        if Self::heal_stuck_streaming_turn(s, emits, persists, now) {
             return Some(StallTickAction::Healed {
                 session_id: s.app_session_id.clone(),
             });

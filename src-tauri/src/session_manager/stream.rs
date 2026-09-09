@@ -133,10 +133,28 @@ pub(crate) fn resolve_turn_event_route(
 /// Disk payload for one stream journal flush, prepared under the session
 /// lock (`prepare_stream_journal_flush`) and committed to disk outside it
 /// (`commit_stream_journal_flush`).
-pub(super) struct PendingStreamJournalFlush {
-    pub(super) session_id: String,
-    pub(super) message: ChatMessageStored,
-    pub(super) meta: store::SessionMeta,
+pub(crate) struct PendingStreamJournalFlush {
+    pub(crate) session_id: String,
+    pub(crate) message: ChatMessageStored,
+    pub(crate) meta: store::SessionMeta,
+}
+
+/// Turn-error / turn-cancelled journal row + IPC, prepared under a session lock
+/// and committed only after that lock drops (shared GROK_HOME file lock +
+/// `app.emit` must not run while holding `inner` / `background`).
+pub(crate) struct PendingTurnBoundaryPersist {
+    pub(crate) stream_flush: Option<PendingStreamJournalFlush>,
+    pub(crate) session_id: String,
+    pub(crate) message: ChatMessageStored,
+    pub(crate) meta: store::SessionMeta,
+    pub(crate) emit_event: &'static str,
+    pub(crate) emit_payload: serde_json::Value,
+}
+
+/// Lock-free disk/IPC work collected while a session-map mutex is held.
+pub(crate) enum PendingSessionPersist {
+    StreamJournal(PendingStreamJournalFlush),
+    TurnBoundary(PendingTurnBoundaryPersist),
 }
 
 impl SessionManager {
@@ -364,12 +382,12 @@ impl SessionManager {
     /// returns `None` if still deferred.
     ///
     /// Stream IPC is taken into `pending_emits` (caller emits after locks drop).
-    /// `pending_emits` is `None` only in pure unit tests (clear, no IPC).
-    /// `app` is only for `journal_turn_cancelled` turn_marker IPC (not stream).
+    /// Disk / turn-marker IPC go into `pending_persists` (caller commits after
+    /// locks drop). Both are `None` only in pure unit tests.
     pub(super) fn try_finish_deferred_prompt_complete(
         s: &mut LiveSession,
-        app: Option<&AppHandle>,
         pending_emits: Option<&mut Vec<StreamEmitPayload>>,
+        pending_persists: Option<&mut Vec<PendingSessionPersist>>,
     ) -> Option<Option<(String, String, String)>> {
         let stop_reason = s.deferred_prompt_complete.clone()?;
         // The `session/prompt` RPC has not resolved → the agent may still emit
@@ -412,19 +430,30 @@ impl SessionManager {
         // UI first (pending IPC), then journal — both must see the full tail.
         // Stream emit happens after the caller drops session locks.
         Self::take_pending_stream_emit_done_into(s, pending_emits);
-        // Force-flush assistant turn (I04 end-of-turn path).
-        Self::maybe_flush_stream_journal(s, true, false);
         // Hard cancel (permission_rejected / CLI cancelled mid-tools) must leave
         // a durable end-of-turn chip so live and history show the same reason —
-        // not a silent "half-done" assistant row.
+        // not a silent "half-done" assistant row. `prepare_journal_turn_cancelled`
+        // also force-flushes the assistant stream journal.
         if let Some(reason) = infer_hard_end_reason_from_stop(
             &stop_reason,
             &s.app_session_id,
             journal_suggests_permission_reject,
         ) {
-            Self::journal_turn_cancelled(s, app, &reason);
+            if let Some(boundary) = Self::prepare_journal_turn_cancelled(s, &reason) {
+                Self::push_session_persist(
+                    pending_persists,
+                    PendingSessionPersist::TurnBoundary(boundary),
+                );
+            }
         } else {
             crate::turn_lease::clear_lease(&s.app_session_id);
+            // Force-flush assistant turn (I04 end-of-turn path).
+            if let Some(flush) = Self::prepare_stream_journal_flush(s, true, false) {
+                Self::push_session_persist(
+                    pending_persists,
+                    PendingSessionPersist::StreamJournal(flush),
+                );
+            }
         }
         s.stream_buf.clear();
         s.stream_thought.clear();
@@ -450,18 +479,30 @@ impl SessionManager {
         Some(empty)
     }
 
-    /// Persist + emit a `turn_cancelled|<reason>` row so the transcript shows
-    /// why the turn hard-stopped (user stop, CLI upgrade, permission, …).
-    /// Skips when this turn already has an end-of-turn marker (no double chips).
-    pub(super) fn journal_turn_cancelled(
-        s: &mut LiveSession,
-        app: Option<&AppHandle>,
-        reason: &str,
+    fn push_session_persist(
+        pending_persists: Option<&mut Vec<PendingSessionPersist>>,
+        item: PendingSessionPersist,
     ) {
-        if has_turn_end_marker_after_last_user(&s.app_session_id) {
-            return;
+        if let Some(out) = pending_persists {
+            out.push(item);
+        } else {
+            // Unit tests: commit without IPC.
+            Self::commit_session_persists(None, vec![item]);
         }
-        Self::maybe_flush_stream_journal(s, true, false);
+    }
+
+    /// Prepare a `turn_cancelled|<reason>` row so the transcript shows why the
+    /// turn hard-stopped. Skips when this turn already has an end-of-turn
+    /// marker (no double chips). Caller must
+    /// [`commit_turn_boundary_persist`] after dropping session locks.
+    pub(super) fn prepare_journal_turn_cancelled(
+        s: &mut LiveSession,
+        reason: &str,
+    ) -> Option<PendingTurnBoundaryPersist> {
+        if has_turn_end_marker_after_last_user(&s.app_session_id) {
+            return None;
+        }
+        let stream_flush = Self::prepare_stream_journal_flush(s, true, false);
         let reason = normalize_hard_end_reason(reason);
         if reason == "host_exit" || reason == "agent_exit" {
             crate::turn_lease::mark_interrupted(&s.app_session_id);
@@ -473,37 +514,31 @@ impl SessionManager {
         // Neutral chips: user stop + generic mid-run cancel. Infra / permission
         // hard ends stay is_error so history can highlight them if needed.
         let is_error = !matches!(reason, "user_stop" | "cancelled");
-        if let Err(e) = store::append_message(
-            &s.app_session_id,
-            ChatMessageStored {
-                id: mid.clone(),
-                role: "tool".into(),
-                content: content.clone(),
-                thought: None,
-                created_at: chrono::Utc::now(),
-                is_error,
-                attachments: None,
-                marker: Some("turn_cancelled".into()),
-            },
-        ) {
-            tracing::error!(session = %s.app_session_id, "turn-cancelled journal append failed: {e}");
-        }
         s.meta.updated_at = chrono::Utc::now();
-        if let Err(e) = store::update_session_meta(&s.meta) {
-            tracing::warn!(session = %s.app_session_id, "turn-cancelled metadata update failed: {e}");
-        }
-        if let Some(app) = app {
-            let _ = app.emit(
-                "session://turn_marker",
-                serde_json::json!({
-                    "sessionId": s.app_session_id,
-                    "messageId": mid,
-                    "marker": "turn_cancelled",
-                    "reason": reason,
-                    "content": content,
-                }),
-            );
-        }
+        let message = ChatMessageStored {
+            id: mid.clone(),
+            role: "tool".into(),
+            content: content.clone(),
+            thought: None,
+            created_at: chrono::Utc::now(),
+            is_error,
+            attachments: None,
+            marker: Some("turn_cancelled".into()),
+        };
+        Some(PendingTurnBoundaryPersist {
+            stream_flush,
+            session_id: s.app_session_id.clone(),
+            message,
+            meta: s.meta.clone(),
+            emit_event: "session://turn_marker",
+            emit_payload: serde_json::json!({
+                "sessionId": s.app_session_id,
+                "messageId": mid,
+                "marker": "turn_cancelled",
+                "reason": reason,
+                "content": content,
+            }),
+        })
     }
 
     /// Journal hard-end chips for live + background sessions that are mid-turn
@@ -678,10 +713,11 @@ impl SessionManager {
 
     /// Silent heal before any stall UI. Returns true if the turn was ended.
     /// Stream payloads go into `pending_emits` for emit after locks drop.
+    /// Disk / turn-marker IPC go into `pending_persists` (caller commits after).
     pub(super) fn heal_stuck_streaming_turn(
         s: &mut LiveSession,
-        app: Option<&AppHandle>,
         mut pending_emits: Option<&mut Vec<StreamEmitPayload>>,
+        mut pending_persists: Option<&mut Vec<PendingSessionPersist>>,
         now: Instant,
     ) -> bool {
         if s.fsm.state() != SessionState::Streaming {
@@ -698,7 +734,9 @@ impl SessionManager {
         // Reborrow Option<&mut Vec> for nested calls (as_deref_mut is a no-op type-wise).
         #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
         let emits = pending_emits.as_mut().map(|v| &mut **v);
-        if Self::try_finish_deferred_prompt_complete(s, app, emits).is_some() {
+        #[allow(clippy::option_as_ref_deref, clippy::needless_option_as_deref)]
+        let persists = pending_persists.as_mut().map(|v| &mut **v);
+        if Self::try_finish_deferred_prompt_complete(s, emits, persists).is_some() {
             return true;
         }
 
@@ -880,6 +918,48 @@ impl SessionManager {
                 session = %session_id,
                 "stream session metadata update failed after journal append: {e}"
             );
+        }
+    }
+
+    /// Commit one turn-boundary persist (optional stream flush + row + emit).
+    /// Must not be called while holding `inner` / `background` / `parked`.
+    pub(super) fn commit_turn_boundary_persist(
+        app: Option<&AppHandle>,
+        pending: PendingTurnBoundaryPersist,
+    ) {
+        if let Some(flush) = pending.stream_flush {
+            Self::commit_stream_journal_flush(flush);
+        }
+        if let Err(e) = store::append_message(&pending.session_id, pending.message) {
+            tracing::error!(
+                session = %pending.session_id,
+                "turn-boundary journal append failed: {e}"
+            );
+        }
+        if let Err(e) = store::update_session_meta(&pending.meta) {
+            tracing::warn!(
+                session = %pending.session_id,
+                "turn-boundary metadata update failed: {e}"
+            );
+        }
+        if let Some(app) = app {
+            let _ = app.emit(pending.emit_event, pending.emit_payload);
+        }
+    }
+
+    pub(super) fn commit_session_persists(
+        app: Option<&AppHandle>,
+        pending: Vec<PendingSessionPersist>,
+    ) {
+        for item in pending {
+            match item {
+                PendingSessionPersist::StreamJournal(flush) => {
+                    Self::commit_stream_journal_flush(flush);
+                }
+                PendingSessionPersist::TurnBoundary(boundary) => {
+                    Self::commit_turn_boundary_persist(app, boundary);
+                }
+            }
         }
     }
 

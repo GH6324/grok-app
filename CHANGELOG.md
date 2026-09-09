@@ -13,19 +13,27 @@ See `docs/llm-wiki/release.md`.
 
 ## [Unreleased]
 
+## [0.2.34] - 2026-09-09
+
+> **Highlight:** Bigger wallpaper sources, stronger Windows freeze fixes, safer chat thumbs.
+>
+> **中文 · 亮点：** 壁纸来源大扩展，Windows 卡死修复更完整，聊天缩略图也挡住内网拉取。
+
 ### Fixed
-- Sending with images or attachments no longer shows two identical user bubbles while the reply streams (#1119, #1124).
-- After an idle reconnect, the same user turn is not painted twice when Host and optimistic rows race (#1124).
-- Custom relays show retry progress and a waiting hint under Thinking instead of a blank “working” state (#1126).
-- Wallpaper search keeps media favorites and local paths across pages, and restores the multi-source gallery layout (#1120).
-- Switching wallpaper sources no longer cancels in-flight search; ZDR privacy blocks show a clear image-to-video hint (#1121).
+- Sending with images no longer shows two identical user bubbles while streaming. Also covers attachments (#1119, #1124).
+- Idle reconnect no longer paints the same user turn twice. Host and optimistic rows no longer race (#1124).
+- Custom relays show retry progress under Thinking instead of a blank working state (#1126).
+- Wallpaper search keeps favorites and local paths across pages. Multi-source gallery layout is restored (#1120).
+- Switching wallpaper sources no longer cancels in-flight search. ZDR blocks show a clear image-to-video hint (#1121).
 - Long chats stay smoother on a Windows touchscreen. Slow pans no longer hitch while the finger is down (#1122).
 - Windows no longer freezes when stream IPC or tool journals ran under session locks.
+- Turn errors and cancels release the session lock before disk and UI work.
 - Opening a chat times out stuck history loads and keeps the cached transcript.
 - Connect retry no longer waits unbounded on a stuck claim or stop.
-- Windows agent kill reaps the full process tree so tool shells do not orphan.
+- Windows agent kill reaps the process tree without freezing while taskkill waits.
+- Chat remote image thumbs block private and loopback targets like wallpaper media.
 - One busy terminal tab no longer blocks writes or resize on other tabs.
-- Official login restores from the App agent-home mirror if `~/.grok` auth was wiped.
+- Official login and wallpaper OAuth restore from agent-home if `~/.grok` auth was wiped.
 - Windows titlebar drag moves the window again on older WebView2 (#1075).
 - Feishu remote-control setup shows the publish / availability guide (same as Lark).
 - Search no longer applies results after you close the palette (#1078).
@@ -43,18 +51,20 @@ See `docs/llm-wiki/release.md`.
 - Plugin authorization keeps secrets out of process command lines.
 
 **中文 · 修复**
-- 带图或附件发送时，流式回复过程中不再出现两条相同的用户气泡（#1119、#1124）。
-- 闲置重连后，Host 与乐观气泡竞态时不再把同一条用户消息画两次（#1124）。
-- 自定义中转在「思考中」下显示重试进度与等待提示，不再只有空白的「工作中」（#1126）。
-- 壁纸搜索分页时保留收藏与本地路径，并恢复多来源图库布局（#1120）。
-- 切换壁纸来源不再取消进行中的搜索；ZDR 隐私模式会给出明确的图生视频提示（#1121）。
+- 带图发送时不再出现两条相同的用户气泡。附件发送同样修复（#1119、#1124）。
+- 闲置重连后不再把同一条用户消息画两次。Host 与乐观气泡不再竞态（#1124）。
+- 自定义中转在「思考中」下显示重试进度，不再空白「工作中」（#1126）。
+- 壁纸搜索分页时保留收藏与本地路径。多来源图库布局已恢复（#1120）。
+- 切换壁纸来源不再取消进行中的搜索。ZDR 会给出明确的图生视频提示（#1121）。
 - 长会话在 Windows 触屏上滑动更跟手。不抬手慢滑也不再一顿一顿（#1122）。
 - Windows 上不再因会话锁内发流式事件或写工具日志而整窗卡死。
+- 回合错误与取消会先放开会话锁，再写磁盘和推界面。
 - 打开会话时历史加载会超时，并保留已有缓存内容。
 - 重连不再因卡住的连接占用或 Stop 而无限等待。
-- Windows 结束 Agent 时会清理整棵进程树，避免工具子进程残留。
+- Windows 结束 Agent 会清进程树，等待 taskkill 时不再卡住 Host。
+- 聊天远程缩略图与壁纸一样拦截内网与回环地址。
 - 一个繁忙终端标签页不再挡住其他标签页的输入或缩放。
-- 当 `~/.grok/auth.json` 被清掉时，会从 App agent-home 镜像恢复官方登录。
+- `~/.grok` 凭据被清掉时，官方登录与壁纸 OAuth 会从 agent-home 恢复。
 - Windows 标题栏在旧版 WebView2 上又能拖动窗口（#1075）。
 - 飞书远程控制显示与 Lark 相同的「发布 / 可用性」引导步骤。
 - 关掉搜索面板后，迟到的结果不再写回（#1078）。

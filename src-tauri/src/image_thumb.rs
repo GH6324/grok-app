@@ -337,16 +337,27 @@ pub fn ensure_local_image_thumb(path: &str) -> Result<ImageThumbResult, String> 
     })
 }
 
-/// Download remote image (https) once and cache a chat thumb.
-pub fn ensure_remote_image_thumb(url: &str) -> Result<ImageThumbResult, String> {
+const REMOTE_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Reject cleartext / non-URL input before any network I/O.
+fn require_remote_thumb_https_url(url: &str) -> Result<(), String> {
     let url = url.trim();
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err("not an http(s) url".into());
+    if url.starts_with("https://") {
+        return Ok(());
     }
-    // Block loopback abuse via remote branch.
-    if url.contains("127.0.0.1") || url.contains("localhost") {
-        return Err("loopback url not allowed here".into());
+    if url.starts_with("http://") {
+        return Err("https required".into());
     }
+    Err("not an http(s) url".into())
+}
+
+/// Download remote image (https) once and cache a chat thumb.
+///
+/// Uses the same hop check + [`crate::safe_https_client::SafeHttpsClient`] path as
+/// wallpaper remote media (DNS pin, private/metadata IP block, redirect re-check).
+pub async fn ensure_remote_image_thumb(url: &str) -> Result<ImageThumbResult, String> {
+    let url = url.trim();
+    require_remote_thumb_https_url(url)?;
 
     let key = remote_cache_key(url);
     let out = thumb_path_for_key(&key);
@@ -362,30 +373,7 @@ pub fn ensure_remote_image_thumb(url: &str) -> Result<ImageThumbResult, String> 
         });
     }
 
-    let client = crate::proxy::apply_to_reqwest_blocking(
-        reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::limited(5)),
-    )
-    .build()
-    .map_err(|e| format!("http client: {e}"))?;
-    let resp = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "image/*,*/*;q=0.8")
-        .send()
-        .map_err(|e| format!("download: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("download status {}", resp.status()));
-    }
-    if let Some(len) = resp.content_length() {
-        if len > MAX_REMOTE_BYTES {
-            return Err("remote image too large".into());
-        }
-    }
-    let bytes = read_remote_image_body(resp)?;
-    if bytes.len() as u64 > MAX_REMOTE_BYTES {
-        return Err("remote image too large".into());
-    }
+    let bytes = download_remote_image_bytes_safe(url).await?;
     if bytes.is_empty() {
         return Err("empty remote image".into());
     }
@@ -399,6 +387,68 @@ pub fn ensure_remote_image_thumb(url: &str) -> Result<ImageThumbResult, String> 
         height: h,
         is_original: false,
     })
+}
+
+async fn download_remote_image_bytes_safe(start: &str) -> Result<Vec<u8>, String> {
+    use hyper::header::{HeaderMap, HeaderValue, ACCEPT};
+
+    let policy = crate::skin_net::OriginPolicy::AnyHttps;
+    let client = crate::safe_https_client::SafeHttpsClient::new();
+    let mut current = crate::skin_net::check_hop_async(start, &policy)
+        .await
+        .map_err(|e| e)?;
+
+    for hop in 0..=crate::skin_net::MAX_REDIRECTS {
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("image/*,*/*;q=0.8"));
+        let mut response = client
+            .get(&current, headers, REMOTE_DOWNLOAD_TIMEOUT)
+            .await
+            .map_err(|e| format!("download: {e}"))?;
+
+        if response.status().is_redirection() {
+            if hop == crate::skin_net::MAX_REDIRECTS {
+                return Err("too many redirects".into());
+            }
+            let location = response
+                .headers()
+                .get(hyper::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "redirect missing location".to_string())?;
+            let next = current
+                .join(location)
+                .map_err(|e| format!("redirect join: {e}"))?;
+            current = crate::skin_net::check_hop_async(next.as_str(), &policy)
+                .await
+                .map_err(|e| e)?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!("download status {}", response.status()));
+        }
+        if response
+            .content_length()
+            .is_some_and(|len| len > MAX_REMOTE_BYTES)
+        {
+            return Err("remote image too large".into());
+        }
+
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| format!("download body: {e}"))?
+        {
+            if (bytes.len() as u64).saturating_add(chunk.len() as u64) > MAX_REMOTE_BYTES {
+                return Err("remote image too large".into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        return Ok(bytes);
+    }
+
+    Err("too many redirects".into())
 }
 
 fn read_remote_image_body(reader: impl std::io::Read) -> Result<Vec<u8>, String> {
@@ -421,16 +471,19 @@ fn build_remote_thumb_from_bytes(bytes: &[u8], out: &Path) -> Result<(u32, u32, 
     Ok((width, height, false))
 }
 
-/// Unified entry: local absolute path or http(s) URL.
-pub fn ensure_image_thumb(path_or_url: &str) -> Result<ImageThumbResult, String> {
+/// Unified entry: local absolute path or https URL.
+pub async fn ensure_image_thumb(path_or_url: &str) -> Result<ImageThumbResult, String> {
     let s = path_or_url.trim();
     if s.is_empty() {
         return Err("empty path".into());
     }
     if s.starts_with("https://") || s.starts_with("http://") {
-        return ensure_remote_image_thumb(s);
+        return ensure_remote_image_thumb(s).await;
     }
-    ensure_local_image_thumb(s)
+    let local = s.to_string();
+    tokio::task::spawn_blocking(move || ensure_local_image_thumb(&local))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -502,6 +555,60 @@ mod tests {
             "remote image too large"
         );
         assert_eq!(read_remote_image_body(Cursor::new(b"abc")).unwrap(), b"abc");
+    }
+
+    #[test]
+    fn remote_thumb_requires_https_and_blocks_private_hops() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        assert_eq!(
+            require_remote_thumb_https_url("http://cdn.example.com/a.png").unwrap_err(),
+            "https required"
+        );
+        assert!(require_remote_thumb_https_url("https://cdn.example.com/a.png").is_ok());
+
+        let blocked = crate::skin_net::check_hop(
+            "https://10.0.0.5/secret.png",
+            &crate::skin_net::OriginPolicy::AnyHttps,
+            |_| Ok(vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5))]),
+        )
+        .unwrap_err();
+        assert!(
+            blocked.contains("private") || blocked.contains("metadata") || blocked.contains("blocked"),
+            "unexpected block reason: {blocked}"
+        );
+
+        let loopback = crate::skin_net::check_hop(
+            "https://127.0.0.1/x.png",
+            &crate::skin_net::OriginPolicy::AnyHttps,
+            |_| Ok(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]),
+        )
+        .unwrap_err();
+        assert!(
+            loopback.contains("private")
+                || loopback.contains("metadata")
+                || loopback.contains("localhost")
+                || loopback.contains("blocked"),
+            "unexpected loopback reason: {loopback}"
+        );
+    }
+
+    #[test]
+    fn remote_thumb_download_does_not_use_bare_reqwest() {
+        let src = include_str!("image_thumb.rs");
+        let production = src
+            .split("mod tests {")
+            .next()
+            .expect("production image_thumb source");
+        assert!(
+            production.contains("SafeHttpsClient"),
+            "chat remote thumbs must use SafeHttpsClient"
+        );
+        let needle = ["reqwest", "::", "blocking", "::", "Client"].concat();
+        assert!(
+            !production.contains(&needle),
+            "chat remote thumbs must not build a bare reqwest client"
+        );
     }
 
     #[test]

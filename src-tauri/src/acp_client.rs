@@ -3770,10 +3770,11 @@ impl AcpClient {
 
         // Windows local native only: taskkill /T so tool/shell grandchildren die.
         // SSH/WSL/TCP must not get local process-tree kill.
+        // Off the async worker — sync taskkill wait must not stall Tokio.
         #[cfg(windows)]
         if self.owns_local_process_tree {
             if let Some(pid) = pid {
-                let ok = crate::process_util::kill_process_tree(pid);
+                let ok = crate::process_util::kill_process_tree_async(pid).await;
                 info!(pid, ok, "acp: windows process-tree kill");
             }
         }

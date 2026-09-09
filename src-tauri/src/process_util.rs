@@ -123,11 +123,41 @@ pub fn apply_process_group_no_window_tokio(cmd: &mut tokio::process::Command) {
     }
 }
 
+/// Async wrapper around [`kill_process_tree`].
+///
+/// `taskkill` wait uses `thread::sleep` — never call the sync helper on a Tokio
+/// worker. ACP stop / reconnect timeouts must be able to elapse while tree-kill
+/// runs on the blocking pool.
+pub async fn kill_process_tree_async(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        match tokio::task::spawn_blocking(move || kill_process_tree(pid)).await {
+            Ok(ok) => ok,
+            Err(e) => {
+                tracing::warn!(
+                    target: "grok_app::process",
+                    pid,
+                    error = %e,
+                    "kill_process_tree_async: join failed"
+                );
+                false
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
 /// Best-effort Windows process-tree kill via `taskkill /PID <pid> /T /F`.
 ///
 /// Stdout/stderr are suppressed. Execution is bounded by
 /// [`KILL_PROCESS_TREE_TIMEOUT`]. Returns `true` when taskkill exits
 /// successfully. On non-Windows this is a no-op that returns `false`.
+///
+/// Prefer [`kill_process_tree_async`] from async ACP / session-manager paths.
 pub fn kill_process_tree(pid: u32) -> bool {
     #[cfg(windows)]
     {
@@ -870,6 +900,29 @@ mod tests {
     #[test]
     fn kill_process_tree_noop_off_windows() {
         assert!(!kill_process_tree(1));
+    }
+
+    #[test]
+    fn acp_and_bounded_kill_use_async_process_tree_helper() {
+        let acp = include_str!("acp_client.rs");
+        assert!(
+            acp.contains("kill_process_tree_async(pid).await"),
+            "AcpClient::kill must await kill_process_tree_async"
+        );
+        assert!(
+            !acp.contains("process_util::kill_process_tree(pid)"),
+            "AcpClient::kill must not call sync kill_process_tree on the worker"
+        );
+
+        let process = include_str!("session_manager/process.rs");
+        assert!(
+            process.contains("kill_process_tree_async(pid).await"),
+            "kill_acp_bounded fallback must await kill_process_tree_async"
+        );
+        assert!(
+            !process.contains("process_util::kill_process_tree(pid)"),
+            "session_manager must not call sync kill_process_tree on the worker"
+        );
     }
 
     #[test]
