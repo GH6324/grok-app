@@ -1804,7 +1804,12 @@ export function useSessionHostEvents(ctx: SessionHostEventsCtx) {
             const attempt = p.attempt ?? 0;
             const maxRetries = p.maxRetries ?? 12;
             const reason = (p.reason || "").trim();
-            c.setRetryStatus({ attempt, maxRetries, reason });
+            c.setRetryStatus({
+              attempt,
+              maxRetries,
+              reason,
+              aborting: !!p.aborting,
+            });
           }),
         );
        track(

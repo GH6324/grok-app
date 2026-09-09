@@ -571,6 +571,14 @@
   line-height: 1.4;
   font-family: inherit;
 }
+.grok-thought__hint {
+  margin: 2px 0 0 24px; /* 16 icon + 8 gap */
+  max-width: 36rem;
+  color: color-mix(in srgb, var(--chat-text-3, #9ca3af) 92%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
 .grok-thought__caret {
   display: inline-flex;
   align-items: center;

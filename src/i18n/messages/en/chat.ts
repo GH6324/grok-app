@@ -95,6 +95,9 @@ export const enChat = {
   "chat.thinkingLabel": "Thinking",
   /** Live bare-thought chrome with wall-clock (matches Working for …). */
   "chat.thinkingFor": "Thinking for {duration}",
+  "chat.waitingFirstToken": "Still waiting for the first reply…",
+  "chat.providerRetrying": "Retrying provider {attempt}/{max}",
+  "chat.providerRetryingWithReason": "Retrying provider {attempt}/{max}: {reason}",
   /** Finished work phase with duration (matches Thought for …). */
   "chat.workedFor": "Worked for {duration}",
   /** Finished work phase without a usable duration. */

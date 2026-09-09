@@ -969,6 +969,49 @@ describe("session projection", () => {
     expect(out[0]!.attachments).toEqual([att]);
   });
 
+  it("applyRemoteUserMessage does not append when host row already matches (#1124 reconnect)", () => {
+    const out = applyRemoteUserMessage(
+      [
+        { id: "host-already", role: "user", content: "hello again" },
+        { id: "a-pending-r", role: "assistant", content: "", streaming: true },
+      ],
+      { id: "host-new", role: "user", content: "hello again" },
+      "host-stream-r",
+    );
+    expect(out.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(out[0]!.id).toBe("host-already");
+    expect(out.map((m) => m.id)).toEqual(["host-already", "a-pending-r"]);
+  });
+
+  it("applyRemoteUserMessage finds optimistic above a pre-hydrated host twin (#1124)", () => {
+    const out = applyRemoteUserMessage(
+      [
+        { id: "u-1710000000099", role: "user", content: "ping" },
+        { id: "host-pre", role: "user", content: "other" },
+        { id: "a-pending-p", role: "assistant", content: "", streaming: true },
+      ],
+      { id: "host-ping", role: "user", content: "ping" },
+      "host-stream-p",
+    );
+    const users = out.filter((m) => m.role === "user");
+    expect(users).toHaveLength(2);
+    expect(users[0]!.id).toBe("host-ping");
+    expect(users[1]!.id).toBe("host-pre");
+  });
+
+  it("applyRemoteUserMessage matches CRLF optimistic body to LF host body", () => {
+    const out = applyRemoteUserMessage(
+      [
+        { id: "u-1710000000100", role: "user", content: "line1\r\nline2" },
+        { id: "a-pending-cr", role: "assistant", content: "", streaming: true },
+      ],
+      { id: "host-cr", role: "user", content: "line1\nline2" },
+      "host-stream-cr",
+    );
+    expect(out.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(out[0]!.id).toBe("host-cr");
+  });
+
   it("applyStreamChunk grows assistant text once per chunk", () => {
     let messages: ChatMessage[] = [];
     const chunks: StreamPayload[] = [

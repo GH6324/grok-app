@@ -95,6 +95,9 @@ export const zhTWChat = {
   "chat.thinkingLabel": "思考中",
   /** 進行中裸思考摺疊頭：思考中 + 計時（與工作中對稱）。 */
   "chat.thinkingFor": "思考中 {duration}",
+  "chat.waitingFirstToken": "仍在等待模型首個輸出…",
+  "chat.providerRetrying": "中轉重試 {attempt}/{max}",
+  "chat.providerRetryingWithReason": "中轉重試 {attempt}/{max}：{reason}",
   /** 已完成工作階段 + 時長（與思考了對稱）。 */
   "chat.workedFor": "工作了 {duration}",
   /** 無時長時的已完成摺疊頭（統一「工作了」，不用「已工作/工作」）。 */

@@ -9,6 +9,7 @@ import { isTurnPromptMessage } from "./types";
 import {
   EMPTY_USER_KEY,
   isClientOptimisticId,
+  reconcileOptimisticDuplicates,
   stripUserAttachmentRefs,
   userBubbleDedupeKey,
 } from "./rewind";
@@ -195,43 +196,72 @@ export function applyRemoteUserMessage(
 ): ChatMessage[] {
   if (!user?.id || user.role !== "user") return messages;
   if (messages.some((m) => m.id === user.id)) {
-    return ensureLiveAssistantAfterUser(messages, user.id, streamMessageId);
+    return ensureLiveAssistantAfterUser(
+      reconcileOptimisticDuplicates(messages),
+      user.id,
+      streamMessageId,
+    );
   }
 
   const cleanedUser = stripUserAttachmentRefs(user);
-  const userKey = userBubbleDedupeKey(user);
-  let optimisticIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (!m || m.role !== "user" || m.marker === "interjection") continue;
-    const id = m.id || "";
-    // Optimistic composer ids: `u-<ts>` / `u-auto-…` (see isClientOptimisticId).
-    if (
-      userKey !== EMPTY_USER_KEY &&
-      userBubbleDedupeKey(m) === userKey &&
-      (isClientOptimisticId(id) || /^u-/.test(id))
-    ) {
-      optimisticIdx = i;
+  const userKey = userBubbleDedupeKey(cleanedUser);
+
+  // Scan every user row (not only the tail). After idle reconnect / journal
+  // rehydrate the last user may already be a Host UUID; the optimistic `u-…`
+  // can sit above it — matching only the tail would append a duplicate.
+  if (userKey !== EMPTY_USER_KEY) {
+    let optimisticIdx = -1;
+    let existingRealIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m || m.role !== "user" || m.marker === "interjection") continue;
+      if (userBubbleDedupeKey(m) !== userKey) continue;
+      const id = m.id || "";
+      if (
+        isClientOptimisticId(id) ||
+        /^u-\d/.test(id) ||
+        id.startsWith("u-auto-") ||
+        id.startsWith("u-batch-")
+      ) {
+        if (optimisticIdx < 0) optimisticIdx = i;
+      } else if (existingRealIdx < 0) {
+        existingRealIdx = i;
+      }
     }
-    break;
+
+    if (optimisticIdx >= 0) {
+      const next = messages.map((m, i) =>
+        i === optimisticIdx
+          ? {
+              ...cleanedUser,
+              attachments: cleanedUser.attachments?.length
+                ? cleanedUser.attachments
+                : m.attachments,
+            }
+          : m,
+      );
+      return ensureLiveAssistantAfterUser(
+        reconcileOptimisticDuplicates(next),
+        user.id,
+        streamMessageId,
+      );
+    }
+
+    if (existingRealIdx >= 0) {
+      return ensureLiveAssistantAfterUser(
+        reconcileOptimisticDuplicates(messages),
+        user.id,
+        streamMessageId,
+      );
+    }
   }
 
-  let next: ChatMessage[];
-  if (optimisticIdx >= 0) {
-    next = messages.map((m, i) =>
-      i === optimisticIdx
-        ? {
-            ...cleanedUser,
-            attachments: cleanedUser.attachments?.length
-              ? cleanedUser.attachments
-              : m.attachments,
-          }
-        : m,
-    );
-  } else {
-    next = [...messages, cleanedUser];
-  }
-  return ensureLiveAssistantAfterUser(next, user.id, streamMessageId);
+  const next = [...messages, cleanedUser];
+  return ensureLiveAssistantAfterUser(
+    reconcileOptimisticDuplicates(next),
+    user.id,
+    streamMessageId,
+  );
 }
 
 function ensureLiveAssistantAfterUser(

@@ -327,7 +327,8 @@ export function stripUserAttachmentRefs(message: ChatMessage): ChatMessage {
  */
 export function userBubbleDedupeKey(message: ChatMessage): string {
   const parsed = parseAttachmentsFromContent(message.content ?? "");
-  const text = parsed.text.trim();
+  // Windows composers may keep CRLF; Host journal normalizes to LF.
+  const text = parsed.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   const paths = new Set<string>();
   for (const a of message.attachments ?? []) {
     if (a.path) paths.add(a.path);

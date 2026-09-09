@@ -179,9 +179,14 @@ export type ComposerSendHost = {
   setPromptHistoryScope: Dispatch<SetStateAction<any>>;
   setEditingUserMessageId: Dispatch<SetStateAction<string | null>>;
   setEditAttachments: Dispatch<SetStateAction<Attachment[]>>;
-  setRetryStatus: Dispatch<
-    SetStateAction<{ attempt: number; maxRetries: number; reason: string } | null>
-  >;
+  setRetryStatus: (
+    next: {
+      attempt: number;
+      maxRetries: number;
+      reason: string;
+      aborting?: boolean;
+    } | null,
+  ) => void;
   setRecentPromptHistory: Dispatch<SetStateAction<any>>;
   setAppDialog: Dispatch<SetStateAction<AppDialog | null>>;
 };
