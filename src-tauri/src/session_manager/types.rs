@@ -873,6 +873,113 @@ pub(super) fn journal_host_tool_step(
     }
 }
 
+/// Owned completed-tool journal RMW inputs. Clone under a session-map lock;
+/// persist only after that lock is released (shared GROK_HOME file lock can
+/// stall for seconds and must not block `inner` / `background`).
+#[derive(Clone, Debug)]
+pub(super) struct PendingCompletedToolJournal {
+    pub app_sid: String,
+    pub tool_call_id: String,
+    pub mid: String,
+    pub content: String,
+    pub is_error: bool,
+}
+
+#[cfg(test)]
+type ToolJournalPersistTestHook = Box<dyn Fn(&PendingCompletedToolJournal) + Send>;
+#[cfg(test)]
+static TOOL_JOURNAL_PERSIST_TEST_HOOK: parking_lot::Mutex<Option<ToolJournalPersistTestHook>> =
+    parking_lot::Mutex::new(None);
+
+/// Disk RMW for a terminal tool_step row (live + background paths).
+pub(super) fn persist_completed_tool_journal(
+    app_sid: String,
+    tool_call_id: String,
+    mid: String,
+    content: String,
+    is_error: bool,
+) {
+    persist_completed_tool_journal_job(PendingCompletedToolJournal {
+        app_sid,
+        tool_call_id,
+        mid,
+        content,
+        is_error,
+    });
+}
+
+pub(super) fn persist_completed_tool_journal_job(job: PendingCompletedToolJournal) {
+    #[cfg(test)]
+    {
+        if let Some(ref hook) = *TOOL_JOURNAL_PERSIST_TEST_HOOK.lock() {
+            hook(&job);
+        }
+    }
+    let PendingCompletedToolJournal {
+        app_sid,
+        tool_call_id,
+        mid,
+        content,
+        is_error,
+    } = job;
+    let mut msgs = store::load_messages(&app_sid);
+    if let Some(slot) = msgs.iter_mut().find(|m| m.id == mid) {
+        if tool_journal_richer(&slot.content, &content) {
+            slot.content = content;
+            slot.marker = Some("tool_step".into());
+            if let Err(e) = store::save_messages(&app_sid, &msgs) {
+                tracing::error!(
+                    session = %app_sid,
+                    tool = %tool_call_id,
+                    "tool journal update failed: {e}"
+                );
+            }
+        }
+        return;
+    }
+    if let Err(e) = store::append_message(
+        &app_sid,
+        ChatMessageStored {
+            id: mid,
+            role: "tool".into(),
+            content,
+            thought: None,
+            created_at: chrono::Utc::now(),
+            is_error,
+            attachments: None,
+            marker: Some("tool_step".into()),
+        },
+    ) {
+        tracing::error!(
+            session = %app_sid,
+            tool = %tool_call_id,
+            "tool journal append failed: {e}"
+        );
+    }
+}
+
+/// Schedule completed-tool journal RMW off the caller thread (and off any
+/// session-map lock the caller just dropped).
+pub(super) fn schedule_completed_tool_journal_persist(job: PendingCompletedToolJournal) {
+    tauri::async_runtime::spawn_blocking(move || {
+        persist_completed_tool_journal(
+            job.app_sid,
+            job.tool_call_id,
+            job.mid,
+            job.content,
+            job.is_error,
+        );
+    });
+}
+
+/// Test-only: invoke the persist hook without disk RMW.
+#[cfg(test)]
+pub(super) fn persist_completed_tool_journal_for_test(job: PendingCompletedToolJournal) {
+    if let Some(ref hook) = *TOOL_JOURNAL_PERSIST_TEST_HOOK.lock() {
+        hook(&job);
+    }
+}
+
 /// Collapse newlines/whitespace so `tool_step|status|kind|title` stays one line.
 /// Multi-line shell titles (`Execute \`line1\nline2\``) previously broke journal
 /// parsing: only the first line was header, and the `input:` marker got buried.
@@ -1878,5 +1985,79 @@ mod journal_attach_tests {
         let once = append_journal_attachment_refs("hello\n\nworld".into(), &[att("/tmp/a.txt")]);
         let twice = append_journal_attachment_refs(once.clone(), &[att("/tmp/a.txt")]);
         assert_eq!(once, twice);
+    }
+}
+
+#[cfg(test)]
+mod background_tool_journal_lock_tests {
+    use super::{
+        persist_completed_tool_journal_for_test, PendingCompletedToolJournal,
+        TOOL_JOURNAL_PERSIST_TEST_HOOK,
+    };
+    use parking_lot::Mutex;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn tool_journal_persist_runs_after_background_lock_release() {
+        // Stand-in for SessionManager.background: under lock we only account +
+        // clone a PendingCompletedToolJournal; blocked persist must not keep
+        // the mutex (shared GROK_HOME RMW must not stall other session cmds).
+        let background = Arc::new(Mutex::new(HashMap::<String, u32>::new()));
+        background.lock().insert("bg-sid".into(), 0);
+
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        *TOOL_JOURNAL_PERSIST_TEST_HOOK.lock() = Some(Box::new(move |_job| {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+        }));
+
+        let job = {
+            let mut bg = background.lock();
+            let n = bg.get_mut("bg-sid").expect("session");
+            *n = n.saturating_add(1);
+            PendingCompletedToolJournal {
+                app_sid: "bg-sid".into(),
+                tool_call_id: "t1".into(),
+                mid: "tool-t1".into(),
+                content: "tool_step|completed|read|f".into(),
+                is_error: false,
+            }
+        };
+
+        let bg_for_check = Arc::clone(&background);
+        let mutated_while_blocked = Arc::new(AtomicBool::new(false));
+        let mutated_flag = Arc::clone(&mutated_while_blocked);
+
+        let persist_thread = thread::spawn(move || {
+            persist_completed_tool_journal_for_test(job);
+        });
+
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("persist hook should start");
+
+        assert!(
+            bg_for_check.try_lock().is_some(),
+            "background mutex must be free while journal persist is blocked"
+        );
+        {
+            let mut bg = bg_for_check.lock();
+            *bg.get_mut("bg-sid").expect("session") += 1;
+        }
+        mutated_flag.store(true, Ordering::SeqCst);
+
+        release_tx.send(()).expect("release persist");
+        persist_thread.join().expect("persist thread");
+        assert!(mutated_while_blocked.load(Ordering::SeqCst));
+        assert_eq!(*background.lock().get("bg-sid").unwrap(), 2);
+
+        *TOOL_JOURNAL_PERSIST_TEST_HOOK.lock() = None;
     }
 }

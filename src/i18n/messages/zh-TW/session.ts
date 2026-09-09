@@ -324,4 +324,7 @@ export const zhTWSession = {
   "session.tracesFilter.local": "本機",
   "session.tracesFilter.uploaded": "已上傳",
   "session.tracesUploadedBadgeTitle": "匯出所報告的上傳狀態（僅路徑 — 不儲存遠端 URL）",
+  "session.journalLoadTimedOut": "聊天記錄載入逾時。已盡量顯示快取內容，可再次開啟對話重試。",
+  "session.journalLoadFailed": "無法載入聊天記錄。已盡量顯示快取內容，可再次開啟對話重試。",
+  "session.connectClaimTimedOut": "此對話仍有一次連線進行中，請稍後再試。",
 };

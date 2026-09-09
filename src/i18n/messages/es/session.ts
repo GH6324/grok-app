@@ -324,4 +324,7 @@ export const esSession = {
   "session.tracesFilter.local": "Local",
   "session.tracesFilter.uploaded": "Subidas",
   "session.tracesUploadedBadgeTitle": "Subida informada por la exportación (solo ruta — no se guarda URL remota)",
+  "session.journalLoadTimedOut": "La carga del historial tardó demasiado. Se muestra la copia en caché si existe; vuelve a abrir el chat para reintentar.",
+  "session.journalLoadFailed": "No se pudo cargar el historial. Se muestra la copia en caché si existe; vuelve a abrir el chat para reintentar.",
+  "session.connectClaimTimedOut": "Otra conexión de este chat sigue en curso. Inténtalo de nuevo en un momento.",
 };

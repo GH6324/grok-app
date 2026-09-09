@@ -55,12 +55,30 @@ pub fn path_list_separator() -> char {
     }
 }
 
+/// Windows `CREATE_NO_WINDOW` — hide the console for GUI-spawned CLI tools.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Windows `CREATE_NEW_PROCESS_GROUP` — child becomes a killable process-group root.
+#[cfg(windows)]
+pub const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Bound for [`kill_process_tree`] (`taskkill` wait).
+#[cfg(windows)]
+const KILL_PROCESS_TREE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Creation flags for local Windows agent/CLI children that must be tree-killable:
+/// `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`.
+#[cfg(windows)]
+pub fn windows_process_group_flags() -> u32 {
+    CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+}
+
 /// Hide console window when spawning CLI tools from a GUI app (Windows).
 pub fn apply_no_window_std(cmd: &mut StdCommand) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let _ = cmd;
@@ -70,9 +88,121 @@ pub fn apply_no_window_std(cmd: &mut StdCommand) {
 pub fn apply_no_window_tokio(cmd: &mut tokio::process::Command) {
     #[cfg(target_os = "windows")]
     {
-        cmd.creation_flags(0x0800_0000);
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let _ = cmd;
+}
+
+/// Local Windows spawn: new process group + no console window.
+///
+/// Use for native ACP / agent children so [`kill_process_tree`] can reap
+/// tool/shell grandchildren. Do **not** apply on SSH/WSL-wrapped spawns —
+/// those children are remote or live inside WSL and must not get local
+/// process-group / taskkill semantics blindly.
+pub fn apply_process_group_no_window_std(cmd: &mut StdCommand) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(windows_process_group_flags());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
+/// Same as [`apply_process_group_no_window_std`] for `tokio::process::Command`.
+pub fn apply_process_group_no_window_tokio(cmd: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(windows_process_group_flags());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
+}
+
+/// Best-effort Windows process-tree kill via `taskkill /PID <pid> /T /F`.
+///
+/// Stdout/stderr are suppressed. Execution is bounded by
+/// [`KILL_PROCESS_TREE_TIMEOUT`]. Returns `true` when taskkill exits
+/// successfully. On non-Windows this is a no-op that returns `false`.
+pub fn kill_process_tree(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        let mut cmd = command("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    target: "grok_app::process",
+                    pid,
+                    error = %e,
+                    "kill_process_tree: failed to spawn taskkill"
+                );
+                return false;
+            }
+        };
+        let deadline = Instant::now() + KILL_PROCESS_TREE_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let ok = status.success();
+                    if ok {
+                        tracing::info!(
+                            target: "grok_app::process",
+                            pid,
+                            "kill_process_tree: taskkill ok"
+                        );
+                    } else {
+                        tracing::warn!(
+                            target: "grok_app::process",
+                            pid,
+                            code = ?status.code(),
+                            "kill_process_tree: taskkill exited non-zero"
+                        );
+                    }
+                    return ok;
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    tracing::warn!(
+                        target: "grok_app::process",
+                        pid,
+                        timeout_secs = KILL_PROCESS_TREE_TIMEOUT.as_secs(),
+                        "kill_process_tree: taskkill timed out"
+                    );
+                    return false;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "grok_app::process",
+                        pid,
+                        error = %e,
+                        "kill_process_tree: wait failed"
+                    );
+                    return false;
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 /// Whether process env already has a non-empty `HOME`.
@@ -711,6 +841,35 @@ mod tests {
     #[test]
     fn user_home_nonempty() {
         assert!(!user_home().as_os_str().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_process_group_flags_or_both_bits() {
+        let flags = windows_process_group_flags();
+        assert_eq!(flags, CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        assert_ne!(flags & CREATE_NEW_PROCESS_GROUP, 0);
+        assert_ne!(flags & CREATE_NO_WINDOW, 0);
+        // CREATE_NO_WINDOW alone must not include the process-group bit.
+        assert_eq!(CREATE_NO_WINDOW & CREATE_NEW_PROCESS_GROUP, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kill_process_tree_missing_pid_completes_bounded() {
+        // Extremely unlikely live PID; taskkill should fail fast / non-zero.
+        let started = std::time::Instant::now();
+        let _ok = kill_process_tree(u32::MAX - 7);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(6),
+            "kill_process_tree must stay within the bounded timeout"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn kill_process_tree_noop_off_windows() {
+        assert!(!kill_process_tree(1));
     }
 
     #[test]

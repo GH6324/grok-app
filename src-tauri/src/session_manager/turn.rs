@@ -507,6 +507,7 @@ impl SessionManager {
                     // someone else's turn — recording the error there would blame
                     // the wrong chat.
                     let mut record_error = false;
+                    let mut pending_emits = Vec::new();
                     mgr.with_session_mut(&turn_sid, |s| {
                         // The RPC failed, so no authoritative PromptComplete will
                         // arrive. Release the turn or the chat stays un-parkable
@@ -523,11 +524,12 @@ impl SessionManager {
                         }
                         // Skip if host already recorded a retry-exhausted error this turn.
                         if !s.provider_retry_aborted {
-                            SessionManager::record_turn_error(s, &app2, &e);
+                            SessionManager::record_turn_error(s, &app2, &e, &mut pending_emits);
                             let _ = s.fsm.fail_with(e);
                             record_error = true;
                         }
                     });
+                    SessionManager::emit_stream_payloads(&app2, pending_emits);
                     if record_error {
                         mgr.emit_for_session(&app2, &turn_sid);
                     }
@@ -544,6 +546,7 @@ impl SessionManager {
                     // but FSM never left Streaming — UI shows "thinking" forever
                     // while the agent turn already ended (journal may hold body).
                     let mut need_emit = false;
+                    let mut pending_emits = Vec::new();
                     mgr.with_session_mut(&turn_sid, |s| {
                         // Only heal sticky *Streaming* here — leave
                         // AwaitingPermission alone (user gate still live).
@@ -561,6 +564,7 @@ impl SessionManager {
                             need_emit = SessionManager::try_finish_deferred_prompt_complete(
                                 s,
                                 Some(&app2),
+                                Some(&mut pending_emits),
                             )
                             .is_some();
                         } else if sticky_streaming {
@@ -575,6 +579,7 @@ impl SessionManager {
                             need_emit = SessionManager::try_finish_deferred_prompt_complete(
                                 s,
                                 Some(&app2),
+                                Some(&mut pending_emits),
                             )
                             .is_some();
                             // If gates still block finish, at least drop busy so
@@ -584,12 +589,13 @@ impl SessionManager {
                                 && s.pending_plan_rpc_id.is_none()
                                 && s.pending_ask_user_rpc_id.is_none()
                             {
-                                // Best-effort flush so partial stream_buf is not lost
+                                // Best-effort take so partial stream_buf is not lost
                                 // when we force-end without try_finish.
-                                SessionManager::flush_pending_stream_emit_done(
-                                    s,
-                                    Some(&app2),
-                                );
+                                if let Some(p) =
+                                    SessionManager::take_pending_stream_emit_done(s)
+                                {
+                                    pending_emits.push(p);
+                                }
                                 SessionManager::maybe_flush_stream_journal(s, true, false);
                                 s.stream_buf.clear();
                                 s.stream_thought.clear();
@@ -603,6 +609,7 @@ impl SessionManager {
                             }
                         }
                     });
+                    SessionManager::emit_stream_payloads(&app2, pending_emits);
                     if need_emit {
                         mgr.emit_for_session(&app2, &turn_sid);
                     }

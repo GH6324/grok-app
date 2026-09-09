@@ -324,4 +324,7 @@ export const ptBRSession = {
   "session.tracesFilter.local": "Local",
   "session.tracesFilter.uploaded": "Enviados",
   "session.tracesUploadedBadgeTitle": "Upload relatado pela exportação (só caminho — nenhuma URL remota armazenada)",
+  "session.journalLoadTimedOut": "O histórico demorou demais para carregar. Mostrando o cache se houver — abra o chat de novo para tentar.",
+  "session.journalLoadFailed": "Não foi possível carregar o histórico. Mostrando o cache se houver — abra o chat de novo para tentar.",
+  "session.connectClaimTimedOut": "Outra conexão deste chat ainda está em andamento. Tente de novo em instantes.",
 };

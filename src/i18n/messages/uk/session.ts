@@ -324,4 +324,7 @@ export const ukSession = {
   "session.tracesFilter.local": "Локальні",
   "session.tracesFilter.uploaded": "Вивантажені",
   "session.tracesUploadedBadgeTitle": "Вивантаження повідомлено експортом (лише шлях — віддалений URL не зберігається)",
+  "session.journalLoadTimedOut": "Історія чату завантажувалась надто довго. Показано кеш, якщо є — відкрийте чат знову, щоб повторити.",
+  "session.journalLoadFailed": "Не вдалося завантажити історію чату. Показано кеш, якщо є — відкрийте чат знову, щоб повторити.",
+  "session.connectClaimTimedOut": "Для цього чату ще виконується підключення. Спробуйте трохи пізніше.",
 };

@@ -324,4 +324,7 @@ export const frSession = {
   "session.tracesFilter.local": "Local",
   "session.tracesFilter.uploaded": "Envoyé",
   "session.tracesUploadedBadgeTitle": "Envoi signalé par l’export (chemin uniquement — aucune URL distante stockée)",
+  "session.journalLoadTimedOut": "Le chargement de l’historique a pris trop de temps. L’historique en cache s’affiche s’il est disponible — rouvrez le chat pour réessayer.",
+  "session.journalLoadFailed": "Impossible de charger l’historique. L’historique en cache s’affiche s’il est disponible — rouvrez le chat pour réessayer.",
+  "session.connectClaimTimedOut": "Une autre connexion pour ce chat est encore en cours. Réessayez dans un instant.",
 };

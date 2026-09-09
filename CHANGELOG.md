@@ -14,6 +14,11 @@ See `docs/llm-wiki/release.md`.
 ## [Unreleased]
 
 ### Fixed
+- Windows no longer freezes when stream IPC or tool journals ran under session locks.
+- Opening a chat times out stuck history loads and keeps the cached transcript.
+- Connect retry no longer waits unbounded on a stuck claim or stop.
+- Windows agent kill reaps the full process tree so tool shells do not orphan.
+- One busy terminal tab no longer blocks writes or resize on other tabs.
 - Official login restores from the App agent-home mirror if `~/.grok` auth was wiped.
 - Windows titlebar drag moves the window again on older WebView2 (#1075).
 - Feishu remote-control setup shows the publish / availability guide (same as Lark).
@@ -32,6 +37,11 @@ See `docs/llm-wiki/release.md`.
 - Plugin authorization keeps secrets out of process command lines.
 
 **中文 · 修复**
+- Windows 上不再因会话锁内发流式事件或写工具日志而整窗卡死。
+- 打开会话时历史加载会超时，并保留已有缓存内容。
+- 重连不再因卡住的连接占用或 Stop 而无限等待。
+- Windows 结束 Agent 时会清理整棵进程树，避免工具子进程残留。
+- 一个繁忙终端标签页不再挡住其他标签页的输入或缩放。
 - 当 `~/.grok/auth.json` 被清掉时，会从 App agent-home 镜像恢复官方登录。
 - Windows 标题栏在旧版 WebView2 上又能拖动窗口（#1075）。
 - 飞书远程控制显示与 Lark 相同的「发布 / 可用性」引导步骤。

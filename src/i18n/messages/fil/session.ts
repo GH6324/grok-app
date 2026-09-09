@@ -324,4 +324,7 @@ export const filSession = {
   "session.tracesFilter.local": "Lokal",
   "session.tracesFilter.uploaded": "Na-upload",
   "session.tracesUploadedBadgeTitle": "Naiulat ng export ang pag-upload (path lang — walang naka-store na remote URL)",
+  "session.journalLoadTimedOut": "Masyadong matagal ang pag-load ng history. Ipinapakita ang cache kung meron — buksan ulit ang chat para subukan.",
+  "session.journalLoadFailed": "Hindi ma-load ang history. Ipinapakita ang cache kung meron — buksan ulit ang chat para subukan.",
+  "session.connectClaimTimedOut": "May ibang connect pa para sa chat na ito. Subukan ulit sandali.",
 };

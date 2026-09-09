@@ -324,4 +324,7 @@ export const jaSession = {
   "session.tracesFilter.local": "ローカル",
   "session.tracesFilter.uploaded": "アップロード済み",
   "session.tracesUploadedBadgeTitle": "書き出しが報告したアップロード（パスのみ — リモート URL は保存しません）",
+  "session.journalLoadTimedOut": "チャット履歴の読み込みがタイムアウトしました。キャッシュがあれば表示します。開き直して再試行してください。",
+  "session.journalLoadFailed": "チャット履歴を読み込めませんでした。キャッシュがあれば表示します。開き直して再試行してください。",
+  "session.connectClaimTimedOut": "このチャットの接続がまだ実行中です。しばらくしてから再試行してください。",
 };

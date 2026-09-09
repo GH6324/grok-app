@@ -324,4 +324,7 @@ export const idSession = {
   "session.tracesFilter.local": "Lokal",
   "session.tracesFilter.uploaded": "Diunggah",
   "session.tracesUploadedBadgeTitle": "Unggahan dilaporkan oleh ekspor (hanya jalur — tidak ada URL jarak jauh disimpan)",
+  "session.journalLoadTimedOut": "Memuat riwayat chat terlalu lama. Menampilkan cache jika ada — buka lagi chat untuk mencoba ulang.",
+  "session.journalLoadFailed": "Tidak bisa memuat riwayat chat. Menampilkan cache jika ada — buka lagi chat untuk mencoba ulang.",
+  "session.connectClaimTimedOut": "Koneksi lain untuk chat ini masih berjalan. Coba lagi sebentar.",
 };

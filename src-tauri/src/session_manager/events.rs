@@ -159,7 +159,7 @@ impl SessionManager {
                 done,
             } => {
                 // Host stream backpressure: coalesce high-frequency tokens.
-                let (need_schedule, pending_journal) = {
+                let (need_schedule, pending_journal, pending_emits) = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
                         // Replay guard: on session resume (`session/load`) the CLI
@@ -242,26 +242,20 @@ impl SessionManager {
                         let pending_journal =
                             Self::prepare_stream_journal_flush(s, emit_done, para);
                         let mid = s.streaming_message_id.clone().unwrap_or_default();
-                        let need = Self::queue_stream_emit(
-                            s,
-                            app,
-                            kind,
-                            mid,
-                            text,
-                            thought_phase,
-                            emit_done,
-                        );
+                        let (need, pending_emits) =
+                            Self::queue_stream_emit(s, kind, mid, text, thought_phase, emit_done);
                         let need_schedule = if need {
                             s.stream_emit_flush_gen = s.stream_emit_flush_gen.wrapping_add(1);
                             Some((s.app_session_id.clone(), s.stream_emit_flush_gen))
                         } else {
                             None
                         };
-                        (need_schedule, pending_journal)
+                        (need_schedule, pending_journal, pending_emits)
                     } else {
                         return;
                     }
                 };
+                Self::emit_stream_payloads(app, pending_emits);
                 if let Some(pending) = pending_journal {
                     Self::commit_stream_journal_flush(pending);
                 }
@@ -273,11 +267,14 @@ impl SessionManager {
                 stop_reason,
                 authoritative,
             } => {
+                let mut pending_emits = Vec::new();
                 let empty_run = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
-                        // Flush any buffered stream before turn-end signals.
-                        Self::flush_pending_stream_emit(s, app);
+                        // Take any buffered stream before turn-end signals.
+                        if let Some(p) = Self::take_pending_stream_emit(s) {
+                            pending_emits.push(p);
+                        }
                         Self::touch_stream_progress_locked(s);
                         // Only the RPC result ends the turn. It is ordered after
                         // every chunk, so clearing here cannot truncate output.
@@ -290,7 +287,11 @@ impl SessionManager {
                             s.deferred_prompt_complete = Some(stop_reason.clone());
                             // #52: do not Ready the UI while tools / permission / ask_user / plan
                             // are still open — agent often fires prompt_complete early.
-                            match Self::try_finish_deferred_prompt_complete(s, Some(app)) {
+                            match Self::try_finish_deferred_prompt_complete(
+                                s,
+                                Some(app),
+                                Some(&mut pending_emits),
+                            ) {
                                 None => {
                                     tracing::info!(
                                         "acp prompt_complete deferred stop={stop_reason} tools={} perm={} plan={} ask={}",
@@ -308,6 +309,7 @@ impl SessionManager {
                         None
                     }
                 };
+                Self::emit_stream_payloads(app, pending_emits);
                 Self::emit_state(app, &self.snapshot());
                 Self::emit_empty_run_if_any(app, empty_run);
             }
@@ -403,17 +405,24 @@ impl SessionManager {
                             "auto_allow",
                             Some(&title),
                         );
+                        let mut pending_emits = Vec::new();
                         let empty = {
                             let mut guard = self.inner.lock();
                             if let Some(s) = guard.as_mut() {
                                 if s.fsm.state() == SessionState::AwaitingPermission {
                                     let _ = s.fsm.permission_resolved_continue();
                                 }
-                                Self::try_finish_deferred_prompt_complete(s, Some(app)).flatten()
+                                Self::try_finish_deferred_prompt_complete(
+                                    s,
+                                    Some(app),
+                                    Some(&mut pending_emits),
+                                )
+                                .flatten()
                             } else {
                                 None
                             }
                         };
+                        Self::emit_stream_payloads(app, pending_emits);
                         Self::emit_empty_run_if_any(app, empty);
                     }
                 } else if auto_deny {
@@ -430,17 +439,24 @@ impl SessionManager {
                             "auto_deny",
                             Some(&title),
                         );
+                        let mut pending_emits = Vec::new();
                         let empty = {
                             let mut guard = self.inner.lock();
                             if let Some(s) = guard.as_mut() {
                                 if s.fsm.state() == SessionState::AwaitingPermission {
                                     let _ = s.fsm.permission_resolved_continue();
                                 }
-                                Self::try_finish_deferred_prompt_complete(s, Some(app)).flatten()
+                                Self::try_finish_deferred_prompt_complete(
+                                    s,
+                                    Some(app),
+                                    Some(&mut pending_emits),
+                                )
+                                .flatten()
                             } else {
                                 None
                             }
                         };
+                        Self::emit_stream_payloads(app, pending_emits);
                         Self::emit_empty_run_if_any(app, empty);
                     }
                 } else {
@@ -606,6 +622,7 @@ impl SessionManager {
                     );
                 }
 
+                let mut pending_emits = Vec::new();
                 let (app_sid, project_path, empty_run, open_changed, already_terminal) = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -620,7 +637,11 @@ impl SessionManager {
                         };
                         s.tools_this_turn = s.tools_this_turn.saturating_add(1);
                         // Tools settled → apply deferred prompt_complete if any (#52).
-                        let finished = Self::try_finish_deferred_prompt_complete(s, Some(app));
+                        let finished = Self::try_finish_deferred_prompt_complete(
+                            s,
+                            Some(app),
+                            Some(&mut pending_emits),
+                        );
                         (
                             s.app_session_id.clone(),
                             s.project_path.clone(),
@@ -632,6 +653,7 @@ impl SessionManager {
                         (String::new(), None, None, false, false)
                     }
                 };
+                Self::emit_stream_payloads(app, pending_emits);
                 Self::emit_empty_run_if_any(app, empty_run.clone().flatten());
                 // Live ToolCall used to flatten away Some(None)=finished, so
                 // Ready never reached the UI and the composer stayed on Stop.
@@ -781,21 +803,18 @@ impl SessionManager {
                     }
                     let mid = format!("tool-{tool_call_id}");
                     let is_error = matches!(st, "failed" | "error");
-                    let app_sid_j = app_sid.clone();
-                    let tool_call_id_j = tool_call_id.clone();
                     // Disk RMW must not stall the ACP pump (later stream tokens).
-                    tauri::async_runtime::spawn_blocking(move || {
-                        persist_completed_tool_journal(
-                            app_sid_j,
-                            tool_call_id_j,
-                            mid,
-                            content,
-                            is_error,
-                        );
+                    schedule_completed_tool_journal_persist(PendingCompletedToolJournal {
+                        app_sid: app_sid.clone(),
+                        tool_call_id: tool_call_id.clone(),
+                        mid,
+                        content,
+                        is_error,
                     });
                 }
             }
             AcpEvent::ToolOpenReleased { tool_call_id } => {
+                let mut pending_emits = Vec::new();
                 let empty_run = {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
@@ -805,11 +824,17 @@ impl SessionManager {
                         Self::release_tool_open_on_session(s, &tool_call_id);
                         // Progress without re-arming a false open tool.
                         Self::touch_stream_progress_locked(s);
-                        Self::try_finish_deferred_prompt_complete(s, Some(app)).flatten()
+                        Self::try_finish_deferred_prompt_complete(
+                            s,
+                            Some(app),
+                            Some(&mut pending_emits),
+                        )
+                        .flatten()
                     } else {
                         None
                     }
                 };
+                Self::emit_stream_payloads(app, pending_emits);
                 Self::emit_empty_run_if_any(app, empty_run);
                 Self::emit_state(app, &self.snapshot());
             }
@@ -893,31 +918,36 @@ impl SessionManager {
                 crate::mirror::fanout_event(app, "session://ask_user", &pending);
             }
             AcpEvent::Error { error } => {
+                let mut pending_emits = Vec::new();
                 {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
                         if !s.provider_retry_aborted {
-                            Self::record_turn_error(s, app, &error);
+                            Self::record_turn_error(s, app, &error, &mut pending_emits);
                         } else {
                             // Retry path already recorded the error; still drop busy
                             // markers so reconnect is not stuck Disconnected+busy.
-                            Self::release_failed_turn_markers(s, Some(app));
+                            Self::release_failed_turn_markers(s, Some(&mut pending_emits));
                         }
                         let _ = s.fsm.fail_with(error);
                     }
                 }
+                Self::emit_stream_payloads(app, pending_emits);
                 Self::emit_state(app, &self.snapshot());
             }
             AcpEvent::ProcessExited { code } => {
                 let mut gate_invalidations: Vec<serde_json::Value> = Vec::new();
+                let mut pending_emits = Vec::new();
                 {
                     let mut guard = self.inner.lock();
                     if let Some(s) = guard.as_mut() {
-                        // Deliver the last coalesced stream batch before we drop
+                        // Take the last coalesced stream batch before we drop
                         // the live slot — otherwise ~40ms / 600 chars vanish.
                         // Do not mark done: that would Ready the UI before
                         // fsm.crash / Disconnected (P1-10).
-                        Self::flush_pending_stream_emit(s, app);
+                        if let Some(p) = Self::take_pending_stream_emit(s) {
+                            pending_emits.push(p);
+                        }
                         Self::maybe_flush_stream_journal(s, true, false);
                         let st = s.fsm.state();
                         // Busy includes pending plan / ask_user (not only Streaming FSM).
@@ -955,6 +985,7 @@ impl SessionManager {
                         s.prompt_in_flight = false;
                     }
                 }
+                Self::emit_stream_payloads(app, pending_emits);
                 // Also drop any parked entry with this process id (defensive).
                 self.parked.lock().retain(|_, p| p.process_id != process_id);
                 Self::emit_gates_invalidated(app, "agent_exit", gate_invalidations);
@@ -1090,6 +1121,7 @@ impl SessionManager {
                 );
 
                 if abort {
+                    let mut pending_emits = Vec::new();
                     let (acp, agent_sid) = {
                         let mut guard = self.inner.lock();
                         if let Some(s) = guard.as_mut() {
@@ -1104,7 +1136,7 @@ impl SessionManager {
                                 // Terminal quota uses QuotaExceeded + the CLI sentence.
                                 let err = provider_retry_abort_error(attempt, cap, &reason);
                                 // Chat-visible error row (must happen before clearing stream ids)
-                                Self::record_turn_error(s, app, &err);
+                                Self::record_turn_error(s, app, &err, &mut pending_emits);
                                 let _ = s.fsm.fail_with(err);
                                 (s.acp.clone(), s.meta.agent_session_id.clone())
                             }
@@ -1112,6 +1144,7 @@ impl SessionManager {
                             (None, None)
                         }
                     };
+                    Self::emit_stream_payloads(app, pending_emits);
                     if let Some(acp) = acp {
                         let abort_msg = provider_retry_abort_rpc_message(&reason);
                         acp.abort_pending_prompts(&abort_msg);
@@ -1255,48 +1288,5 @@ impl SessionManager {
                 );
             }
         }
-    }
-}
-
-fn persist_completed_tool_journal(
-    app_sid: String,
-    tool_call_id: String,
-    mid: String,
-    content: String,
-    is_error: bool,
-) {
-    let mut msgs = store::load_messages(&app_sid);
-    if let Some(slot) = msgs.iter_mut().find(|m| m.id == mid) {
-        if tool_journal_richer(&slot.content, &content) {
-            slot.content = content;
-            slot.marker = Some("tool_step".into());
-            if let Err(e) = store::save_messages(&app_sid, &msgs) {
-                tracing::error!(
-                    session = %app_sid,
-                    tool = %tool_call_id,
-                    "tool journal update failed: {e}"
-                );
-            }
-        }
-        return;
-    }
-    if let Err(e) = store::append_message(
-        &app_sid,
-        ChatMessageStored {
-            id: mid,
-            role: "tool".into(),
-            content,
-            thought: None,
-            created_at: chrono::Utc::now(),
-            is_error,
-            attachments: None,
-            marker: Some("tool_step".into()),
-        },
-    ) {
-        tracing::error!(
-            session = %app_sid,
-            tool = %tool_call_id,
-            "tool journal append failed: {e}"
-        );
     }
 }

@@ -324,4 +324,7 @@ export const taSession = {
   "session.tracesFilter.local": "உள்ளக",
   "session.tracesFilter.uploaded": "பதிவேற்றப்பட்டது",
   "session.tracesUploadedBadgeTitle": "பதிவேற்றம் மூலம் அறிவிக்கப்பட்டது (பாதை மட்டும் - ரிமோட் URL சேமிக்கப்படவில்லை)",
+  "session.journalLoadTimedOut": "அரட்டை வரலாறு ஏற்ற காலாவதியானது. கேச் இருந்தால் காட்டப்படும் — மீண்டும் திறந்து முயலவும்.",
+  "session.journalLoadFailed": "அரட்டை வரலாற்றை ஏற்ற முடியவில்லை. கேச் இருந்தால் காட்டப்படும் — மீண்டும் திறந்து முயலவும்.",
+  "session.connectClaimTimedOut": "இந்த அரட்டைக்கு வேறொரு இணைப்பு இன்னும் நடக்கிறது. சிறிது நேரம் கழித்து முயலவும்.",
 };

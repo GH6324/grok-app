@@ -324,4 +324,7 @@ export const zhSession = {
   "session.tracesFilter.local": "本地",
   "session.tracesFilter.uploaded": "已上传",
   "session.tracesUploadedBadgeTitle": "导出所报告的上传状态（仅路径 — 不保存远程 URL）",
+  "session.journalLoadTimedOut": "聊天记录加载超时。已尽量显示缓存内容，可再次打开会话重试。",
+  "session.journalLoadFailed": "无法加载聊天记录。已尽量显示缓存内容，可再次打开会话重试。",
+  "session.connectClaimTimedOut": "该会话仍有一次连接进行中，请稍后再试。",
 };

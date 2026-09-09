@@ -324,4 +324,7 @@ export const ruSession = {
   "session.tracesFilter.local": "Локальные",
   "session.tracesFilter.uploaded": "Отправленные",
   "session.tracesUploadedBadgeTitle": "Экспорт сообщил об отправке (сохраняется только локальный путь, без удалённого URL)",
+  "session.journalLoadTimedOut": "История чата загружалась слишком долго. Показан кэш, если он есть — откройте чат снова, чтобы повторить.",
+  "session.journalLoadFailed": "Не удалось загрузить историю чата. Показан кэш, если он есть — откройте чат снова, чтобы повторить.",
+  "session.connectClaimTimedOut": "Для этого чата ещё выполняется подключение. Повторите чуть позже.",
 };

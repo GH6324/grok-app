@@ -324,4 +324,7 @@ export const deSession = {
   "session.tracesFilter.local": "Lokal",
   "session.tracesFilter.uploaded": "Hochgeladen",
   "session.tracesUploadedBadgeTitle": "Upload vom Export gemeldet (nur Pfad — keine Remote-URL gespeichert)",
+  "session.journalLoadTimedOut": "Chatverlauf hat zu lange gedauert. Zwischengespeicherter Verlauf wird gezeigt, falls vorhanden — Chat erneut öffnen zum Wiederholen.",
+  "session.journalLoadFailed": "Chatverlauf konnte nicht geladen werden. Zwischengespeicherter Verlauf wird gezeigt, falls vorhanden — Chat erneut öffnen zum Wiederholen.",
+  "session.connectClaimTimedOut": "Für diesen Chat läuft noch eine Verbindung. Bitte gleich erneut versuchen.",
 };

@@ -263,6 +263,43 @@ Prefer **delete remote soon after land**, then local. Do not force-push `main`. 
 
 ---
 
+## Windows session freeze — ops notes
+
+Plan: `docs/plans/2026-09-09-windows-freeze-remediation.md`.
+
+### What was fixed (symptoms → lever)
+
+| Symptom | Lever |
+|---------|-------|
+| UI freezes mid-stream / on switch | Stream IPC + bg tool journal no longer run under session-map locks |
+| Session switch hangs on history load | 15s journal-load deadline; cached transcript kept; recoverable error |
+| Retry / reconnect stuck on 连接中 | Claim wait aligned to connect budget; `session_stop` client timeout then force-connect |
+| Orphan tool/shell after agent kill | Windows ACP spawn in process group + `taskkill /T /F` tree kill (local only; not SSH/WSL) |
+| One terminal tab blocks others | PTY map lock only clones handles; per-session write lock + backpressure timeout |
+
+### Structured diagnostics
+
+Look for these when correlating freezes:
+
+- Frontend console: `[session] journal_load_timeout` / `journal_load_failed` / `connect_claim_timeout`
+- Host tracing: `kill_process_tree:*`, `acp kill timeout: fallback process-tree kill`
+- Host: stream emit / tool journal persist must not hold `inner` / `background` (regression tests in `session_manager`)
+
+### Windows smoke matrix (before shipping freeze fixes)
+
+Run on a real Windows build (or CI Windows job) after lock/IPC+timeout stage, then again after process-tree+PTY stage:
+
+1. **Long stream** — multi-minute assistant + thought coalesce; UI stays responsive; switch chats mid-stream  
+2. **Rapid session switch** — open 5+ chats quickly; no stuck opening / journal spinner; timeout shows recoverable error with cache  
+3. **Retry while connecting** — force retry during 连接中; stop timeout still force-connects  
+4. **Tool subprocess cancel** — bash/long tool, Stop; no orphan console windows (Task Manager)  
+5. **Abnormal agent exit** — kill grok CLI mid-turn; App recovers to disconnected + cancel chip; reconnect works  
+6. **Two PTY tabs** — flood one terminal with output; second tab still accepts type/resize  
+
+Ship gate: stage A (locks + timeouts) can land first; stage B (tree-kill + PTY) after matrix passes.
+
+---
+
 ## Agent / AI handoff rules
 
 When an agent maintains this repo:

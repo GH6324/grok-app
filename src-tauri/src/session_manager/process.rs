@@ -345,11 +345,19 @@ impl SessionManager {
 
     /// Drop all in-turn busy markers after a terminal turn failure.
     /// Complements FSM `fail_with` (which only flips state + last_error).
-    pub(super) fn release_failed_turn_markers(s: &mut LiveSession, app: Option<&AppHandle>) {
-        // Flush the last coalesced tokens before dropping the buffer (P0-1 / P1-9).
+    /// Stream payloads go into `pending_emits` for emit after locks drop.
+    pub(super) fn release_failed_turn_markers(
+        s: &mut LiveSession,
+        pending_emits: Option<&mut Vec<StreamEmitPayload>>,
+    ) {
+        // Take the last coalesced tokens before dropping the buffer (P0-1 / P1-9).
         // No done flag: the error / fail_with state should win over a fake Ready.
-        if let Some(app) = app {
-            Self::flush_pending_stream_emit(s, app);
+        if let Some(out) = pending_emits {
+            if let Some(p) = Self::take_pending_stream_emit(s) {
+                out.push(p);
+            }
+        } else {
+            s.pending_stream_emit = None;
         }
         s.prompt_in_flight = false;
         s.streaming_message_id = None;
@@ -994,11 +1002,27 @@ impl SessionManager {
     }
 
     pub(super) async fn kill_acp_bounded(acp: &AcpClient) {
+        let pid = acp.child_pid();
+        let local_tree = acp.owns_local_process_tree();
         if tokio::time::timeout(Duration::from_secs(ACP_KILL_TIMEOUT_SECS), acp.kill())
             .await
             .is_err()
         {
-            tracing::warn!(secs = ACP_KILL_TIMEOUT_SECS, "acp kill timed out");
+            tracing::warn!(
+                secs = ACP_KILL_TIMEOUT_SECS,
+                pid = ?pid,
+                local_tree,
+                "acp kill timed out"
+            );
+            // Best-effort fallback if `AcpClient::kill` hung after transport close
+            // (e.g. wedged `child.kill`). Local Windows trees only — never SSH/WSL.
+            #[cfg(windows)]
+            if local_tree {
+                if let Some(pid) = pid {
+                    let ok = crate::process_util::kill_process_tree(pid);
+                    tracing::warn!(pid, ok, "acp kill timeout: fallback process-tree kill");
+                }
+            }
         }
     }
 
@@ -1427,7 +1451,14 @@ impl SessionManager {
     ///
     /// Content is intentionally short (code + compact reason). The UI maps codes to i18n copy
     /// and must not dump raw RPC/MCP stderr into the chat bubble.
-    pub(super) fn record_turn_error(s: &mut LiveSession, app: &AppHandle, err: &AgentError) {
+    ///
+    /// Stream payloads are pushed into `pending_emits` for emit after locks drop.
+    pub(super) fn record_turn_error(
+        s: &mut LiveSession,
+        app: &AppHandle,
+        err: &AgentError,
+        pending_emits: &mut Vec<StreamEmitPayload>,
+    ) {
         let mid = s
             .streaming_message_id
             .clone()
@@ -1462,7 +1493,7 @@ impl SessionManager {
         // Clear *all* busy markers (including deferred prompt_complete / open tools).
         // Leaving them set after fail_with left the session as Disconnected+busy,
         // so connect no-oped forever and local sends failed while Remote IM still worked.
-        Self::release_failed_turn_markers(s, Some(app));
+        Self::release_failed_turn_markers(s, Some(pending_emits));
 
         let _ = app.emit(
             "session://turn_error",

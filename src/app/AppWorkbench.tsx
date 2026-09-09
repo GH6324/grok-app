@@ -3290,8 +3290,21 @@ export function AppWorkbench() {
         if (result.scheduledFromJournal) {
           sessionNavHostRef.current.catalog.markScheduled(sessionId);
         }
+        if (viewingSessionIdRef.current === sessionId) {
+          setLocalError(null);
+        }
       } else {
         setContextUsage(result.usage);
+        if (
+          viewingSessionIdRef.current === sessionId &&
+          (result.status === "timed_out" || result.status === "failed")
+        ) {
+          setLocalError(
+            result.status === "timed_out"
+              ? tr("session.journalLoadTimedOut")
+              : tr("session.journalLoadFailed"),
+          );
+        }
       }
     };
     host.hydrate.applyReconcileResult = (sessionId, result) => {

@@ -133,11 +133,11 @@ fn new_turn_pre_token_uses_short_window_and_this_turn_tier() {
         });
         let at_45 = t0 + Duration::from_secs(45);
         assert!(
-            SessionManager::tick_stream_stall_on_session(&mut s, None, 600, at_45).is_none(),
+            SessionManager::tick_stream_stall_on_session(&mut s, None, None, 600, at_45).is_none(),
             "45s is inside the 90s pre-token window"
         );
         let at_90 = t0 + Duration::from_secs(90);
-        match SessionManager::tick_stream_stall_on_session(&mut s, None, 600, at_90) {
+        match SessionManager::tick_stream_stall_on_session(&mut s, None, None, 600, at_90) {
             Some(StallTickAction::SoftStall {
                 tier: crate::stream_stall::StallTier::PreFirstToken,
                 stall_seconds: 90,
@@ -166,7 +166,7 @@ fn maybe_done_soft_silence_prompts_never_auto_ends() {
             s.last_stream_progress = t0;
         });
         let now = t0 + Duration::from_secs(180);
-        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, 180, now);
+        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, None, 180, now);
         match action {
             Some(StallTickAction::SoftStall {
                 tier: crate::stream_stall::StallTier::MaybeDone,
@@ -193,7 +193,7 @@ fn no_auto_end_without_this_turn_body() {
             s.last_stream_progress = t0;
         });
         let now = t0 + Duration::from_secs(180);
-        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, 180, now);
+        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, None, 180, now);
         match action {
             Some(StallTickAction::SoftStall { .. }) => {}
             other => panic!("expected soft stall without body, got {other:?}"),
@@ -218,7 +218,7 @@ fn orphan_open_tools_pruned_then_maybe_done_soft_only() {
             s.last_stream_progress = t0;
         });
         let now = t0 + Duration::from_secs(180);
-        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, 180, now);
+        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, None, 180, now);
         match action {
             Some(StallTickAction::SoftStall {
                 tier: crate::stream_stall::StallTier::MaybeDone,
@@ -243,7 +243,7 @@ fn hard_silence_never_force_ends_user_turn() {
             s.last_stream_progress = t0;
         });
         let now = t0 + Duration::from_secs(600);
-        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, 180, now);
+        let action = SessionManager::tick_stream_stall_on_session(&mut s, None, None, 180, now);
         match action {
             Some(StallTickAction::SoftStall { .. }) => {}
             other => panic!("expected soft stall at hard silence, got {other:?}"),
@@ -268,7 +268,7 @@ fn deferred_prompt_complete_keeps_recent_open_tools() {
             s.tools_this_turn = 1;
             s.saw_model_output = true;
         });
-        let finished = SessionManager::try_finish_deferred_prompt_complete(&mut s, None);
+        let finished = SessionManager::try_finish_deferred_prompt_complete(&mut s, None, None);
         assert!(
             finished.is_none(),
             "recent open tools must keep deferred prompt_complete"
@@ -295,7 +295,7 @@ fn deferred_prompt_complete_finishes_after_orphan_prune() {
             s.tools_this_turn = 1;
             s.saw_model_output = true;
         });
-        let finished = SessionManager::try_finish_deferred_prompt_complete(&mut s, None);
+        let finished = SessionManager::try_finish_deferred_prompt_complete(&mut s, None, None);
         assert!(
             finished.is_some(),
             "expected deferred finish after orphan prune"
@@ -319,14 +319,14 @@ fn prompt_complete_does_not_rearm_after_turn_is_ready() {
             s.deferred_prompt_complete = Some("end_turn".into());
             s.saw_model_output = true;
         });
-        let first = SessionManager::try_finish_deferred_prompt_complete(&mut s, None);
+        let first = SessionManager::try_finish_deferred_prompt_complete(&mut s, None, None);
         assert!(first.is_some(), "first finish should complete the turn");
         assert_eq!(s.fsm.state(), SessionState::Ready);
         assert!(s.active_turn_id.is_none());
         assert!(!SessionManager::should_rearm_deferred_prompt_complete(&s));
 
         s.deferred_prompt_complete = Some("end_turn".into());
-        let second = SessionManager::try_finish_deferred_prompt_complete(&mut s, None);
+        let second = SessionManager::try_finish_deferred_prompt_complete(&mut s, None, None);
         assert!(
             second.is_none(),
             "duplicate prompt_complete must not finish again"

@@ -324,4 +324,7 @@ export const itSession = {
   "session.tracesFilter.local": "Locale",
   "session.tracesFilter.uploaded": "Caricati",
   "session.tracesUploadedBadgeTitle": "Caricamento segnalato dall’esportazione (solo percorso — nessun URL remoto memorizzato)",
+  "session.journalLoadTimedOut": "Caricamento cronologia troppo lento. Mostro la cache se disponibile: riapri la chat per riprovare.",
+  "session.journalLoadFailed": "Impossibile caricare la cronologia. Mostro la cache se disponibile: riapri la chat per riprovare.",
+  "session.connectClaimTimedOut": "Un’altra connessione per questa chat è ancora in corso. Riprova tra poco.",
 };

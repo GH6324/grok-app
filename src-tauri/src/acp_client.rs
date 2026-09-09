@@ -338,6 +338,13 @@ pub struct AcpClient {
     /// The spawned CLI process, or `None` in API mode (connected to a remote
     /// ACP server over TCP instead of spawning `grok agent stdio`).
     child: AsyncMutex<Option<Child>>,
+    /// OS PID captured at spawn before the child is handed to reader tasks.
+    /// `None` in TCP / API mode (no local process).
+    child_pid: Option<u32>,
+    /// Local native spawn (not TCP / SSH / WSL). On Windows, enables
+    /// `CREATE_NEW_PROCESS_GROUP` at spawn and `taskkill /T` on stop so
+    /// tool/shell grandchildren die with the agent.
+    owns_local_process_tree: bool,
     /// Write half of the transport (child stdin, or the TCP write half). Both
     /// impl `AsyncWrite`, so the JSON-RPC line protocol is transport-agnostic.
     stdin: AsyncMutex<Option<Box<dyn AsyncWrite + Unpin + Send>>>,
@@ -1647,15 +1654,23 @@ impl AcpClient {
             )
             .map_err(|e| AgentError::new(AgentErrorCode::ConnectFailed, e))?;
         }
-        if ssh_alias.is_none() && wsl_launch.is_none() {
+        // Local native only: process-group + no-window so Windows tree-kill
+        // can reap tool/shell grandchildren. SSH/WSL keep CREATE_NO_WINDOW
+        // alone — do not apply local process-group / taskkill semantics.
+        let owns_local_process_tree = ssh_alias.is_none() && wsl_launch.is_none();
+        if owns_local_process_tree {
             cmd.current_dir(&cwd);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        crate::process_util::apply_no_window_tokio(&mut cmd);
-        if ssh_alias.is_none() && wsl_launch.is_none() {
+        if owns_local_process_tree {
+            crate::process_util::apply_process_group_no_window_tokio(&mut cmd);
+        } else {
+            crate::process_util::apply_no_window_tokio(&mut cmd);
+        }
+        if owns_local_process_tree {
             crate::process_util::ensure_home_env_tokio(&mut cmd);
             if let Some(path) = crate::process_util::enriched_path_env() {
                 cmd.env("PATH", path);
@@ -1729,6 +1744,14 @@ impl AcpClient {
             AgentError::new(code, format!("failed to spawn grok agent stdio: {e}"))
         })?;
 
+        // Capture PID before pipes / reader tasks take ownership of the child.
+        let child_pid = child.id();
+        tracing::info!(
+            pid = ?child_pid,
+            local_tree = owns_local_process_tree,
+            "acp: spawned child"
+        );
+
         let stdin = child
             .stdin
             .take()
@@ -1744,6 +1767,8 @@ impl AcpClient {
 
         let client = Arc::new(Self {
             child: AsyncMutex::new(Some(child)),
+            child_pid,
+            owns_local_process_tree,
             stdin: AsyncMutex::new(Some(Box::new(stdin) as Box<dyn AsyncWrite + Unpin + Send>)),
             next_id: AtomicU64::new(1),
             pending: ParkingMutex::new(HashMap::new()),
@@ -1837,6 +1862,8 @@ impl AcpClient {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let client = Arc::new(Self {
             child: AsyncMutex::new(None),
+            child_pid: None,
+            owns_local_process_tree: false,
             stdin: AsyncMutex::new(Some(
                 Box::new(write_half) as Box<dyn AsyncWrite + Unpin + Send>
             )),
@@ -3710,6 +3737,16 @@ impl AcpClient {
         self.agent_session_id.lock().clone()
     }
 
+    /// OS PID of the spawned child, if any (None for TCP / API mode).
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
+    }
+
+    /// Whether stop should tree-kill local Windows descendants.
+    pub fn owns_local_process_tree(&self) -> bool {
+        self.owns_local_process_tree
+    }
+
     pub async fn kill(&self) {
         // Stop both halves of the transport before touching the child. This is
         // essential for TCP ACP: closing only the writer left the reader task
@@ -3724,9 +3761,36 @@ impl AcpClient {
         // reader task.
         self.reader_stop.notify_one();
         self.fail_all_pending("agent stopped");
-        if let Some(mut child) = self.child.lock().await.take() {
-            let _ = child.kill().await;
+
+        // Take the child handle first so kill_on_drop cannot race tree-kill.
+        let child_opt = self.child.lock().await.take();
+        let pid = self
+            .child_pid
+            .or_else(|| child_opt.as_ref().and_then(|c| c.id()));
+
+        // Windows local native only: taskkill /T so tool/shell grandchildren die.
+        // SSH/WSL/TCP must not get local process-tree kill.
+        #[cfg(windows)]
+        if self.owns_local_process_tree {
+            if let Some(pid) = pid {
+                let ok = crate::process_util::kill_process_tree(pid);
+                info!(pid, ok, "acp: windows process-tree kill");
+            }
         }
+
+        if let Some(mut child) = child_opt {
+            match child.kill().await {
+                Ok(()) => {
+                    if let Some(pid) = pid {
+                        info!(pid, "acp: child.kill ok");
+                    }
+                }
+                Err(e) => {
+                    warn!(pid = ?pid, error = %e, "acp: child.kill failed");
+                }
+            }
+        }
+
         *self.stdin.lock().await = None;
         self.last_update_by_session.lock().clear();
         *self.last_update_unstamped.lock() = None;
