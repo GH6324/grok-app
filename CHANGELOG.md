@@ -17,6 +17,8 @@ See `docs/llm-wiki/release.md`.
 - Sending with images or attachments no longer shows two identical user bubbles while the reply streams (#1119, #1124).
 - After an idle reconnect, the same user turn is not painted twice when Host and optimistic rows race (#1124).
 - Custom relays show retry progress and a waiting hint under Thinking instead of a blank “working” state (#1126).
+- Wallpaper search keeps media favorites and local paths across pages, and restores the multi-source gallery layout (#1120).
+- Switching wallpaper sources no longer cancels in-flight search; ZDR privacy blocks show a clear image-to-video hint (#1121).
 - Long chats stay smoother on a Windows touchscreen. Slow pans no longer hitch while the finger is down (#1122).
 - Windows no longer freezes when stream IPC or tool journals ran under session locks.
 - Opening a chat times out stuck history loads and keeps the cached transcript.
@@ -44,6 +46,8 @@ See `docs/llm-wiki/release.md`.
 - 带图或附件发送时，流式回复过程中不再出现两条相同的用户气泡（#1119、#1124）。
 - 闲置重连后，Host 与乐观气泡竞态时不再把同一条用户消息画两次（#1124）。
 - 自定义中转在「思考中」下显示重试进度与等待提示，不再只有空白的「工作中」（#1126）。
+- 壁纸搜索分页时保留收藏与本地路径，并恢复多来源图库布局（#1120）。
+- 切换壁纸来源不再取消进行中的搜索；ZDR 隐私模式会给出明确的图生视频提示（#1121）。
 - 长会话在 Windows 触屏上滑动更跟手。不抬手慢滑也不再一顿一顿（#1122）。
 - Windows 上不再因会话锁内发流式事件或写工具日志而整窗卡死。
 - 打开会话时历史加载会超时，并保留已有缓存内容。
