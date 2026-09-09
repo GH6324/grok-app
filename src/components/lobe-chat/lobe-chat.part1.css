@@ -110,6 +110,11 @@
   width: 100%;
   background: var(--chat-bg);
   color: var(--chat-text);
+  /* Named container lives on the column, not the overflow scroller.
+   * inline-size containment on the scrollport is a WebView2 main-thread
+   * scrolling reason (slow finger pans hitch with zero JS commits). */
+  container-type: inline-size;
+  container-name: chat-scroll;
 }
 
 .lobe-chat__scroll {
@@ -117,8 +122,6 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  container-type: inline-size;
-  container-name: chat-scroll;
   /* none: kill elastic rubber-band at the locked bottom (macOS trackpad
    * overscroll looked like "can pull a little then snap back + flash"). */
   overscroll-behavior: none;
@@ -271,6 +274,15 @@ html[data-chat-width="full"] .lobe-chat__inner,
 
 .lobe-chat-item--assistant {
   align-items: stretch;
+}
+
+.lobe-chat-item--shell {
+  contain: strict;
+  pointer-events: none;
+  box-sizing: border-box;
+  margin-inline: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--chat-text, #888) 6%, transparent);
 }
 
 .lobe-chat-item__header {
