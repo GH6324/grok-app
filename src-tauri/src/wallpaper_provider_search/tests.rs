@@ -482,11 +482,13 @@ fn provider_cancel_before_begin_remains_sticky_and_bounded() {
 
 #[tokio::test]
 async fn concurrent_provider_probes_report_completion_order() {
+    // Use wide gaps + generous budget so busy CI macOS runners do not drop the
+    // slowest probe under the select! deadline (flake seen after #1138).
     let mut output = Vec::new();
     visit_probes_as_completed(
-        [("first", 30_u64), ("second", 0_u64), ("third", 5_u64)],
+        [("first", 80_u64), ("second", 0_u64), ("third", 20_u64)],
         3,
-        Duration::from_millis(100),
+        Duration::from_millis(1_000),
         |(name, delay_ms)| async move {
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             name
