@@ -20,11 +20,13 @@ See `docs/llm-wiki/release.md`.
 - 数学公式恢复 CSS 与 JS 同版本渲染，不再出现样式超前于脚本。
 
 ### Changed
+- About shows the git short hash when the build is not an exact release tag (#1139).
 - The theme editor modal loads on demand instead of joining app startup.
 - Bundled KaTeX math fonts ship as woff2 only, trimming the install size.
 - Settings reads and writes run on the blocking pool, off the async command path.
 
 **中文 · 变更**
+- 构建不是精确的 release tag 时，About 显示 git short hash（#1139）。
 - 主题编辑器改为按需加载，不再拖累应用启动。
 - 打包内的 KaTeX 数学字体只保留 woff2 格式，安装包更小。
 - 设置的读写改走阻塞线程池，异步命令不再被设置文件锁卡住。
