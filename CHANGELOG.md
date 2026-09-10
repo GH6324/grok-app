@@ -24,12 +24,14 @@ See `docs/llm-wiki/release.md`.
 - Wallpaper no longer flashes black while streaming or following the chat tail.
 - Imagine portrait thumbnails stay contained when the wallpaper window narrows.
 - What's New now lists every entry; some were cut off before.
+- Generated wallpaper stays visible when library indexing fails and can be saved again.
 
 **中文 · 修复**
 - 数学公式恢复 CSS 与 JS 同版本渲染，不再出现样式超前于脚本。
 - 流式输出和自动跟随聊天底部时，静态及动态壁纸不再闪黑。
 - 壁纸窗口缩小时，Imagine 纵向缩略图不再挤压错位。
 - 「新功能」弹窗不再漏掉部分条目。
+- 生成壁纸在图库索引失败时仍会显示，并可直接重试保存。
 
 ### Changed
 - Ctrl+Tab fills the selected chat row. Busy chats show the same spinner as the sidebar (#1146).
@@ -44,6 +46,12 @@ See `docs/llm-wiki/release.md`.
 - 主题编辑器改为按需加载，不再拖累应用启动。
 - 打包内的 KaTeX 数学字体只保留 woff2 格式，安装包更小。
 - 设置的读写改走阻塞线程池，异步命令不再被设置文件锁卡住。
+
+### Improved
+- Local video details now use the file's measured dimensions and duration.
+
+**中文 · 改进**
+- 本地视频详情现在显示文件实测的尺寸与时长。
 
 ## [0.2.34] - 2026-09-09
 
