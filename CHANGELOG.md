@@ -30,6 +30,12 @@ See `docs/llm-wiki/release.md`.
 - 设置的读写改走阻塞线程池，异步命令不再被设置文件锁卡住。
 
 
+### Fixed
+- Wallpaper no longer flashes black while streaming or following the chat tail.
+
+**中文 · 修复**
+- 流式输出和自动跟随聊天底部时，静态及动态壁纸不再闪黑。
+
 ## [0.2.34] - 2026-09-09
 
 > **Highlight:** Bigger wallpaper sources, stronger Windows freeze fixes, safer chat thumbs.
