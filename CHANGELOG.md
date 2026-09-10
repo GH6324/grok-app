@@ -15,9 +15,11 @@ See `docs/llm-wiki/release.md`.
 
 ### Fixed
 - Math formulas render with one matching KaTeX version again. The bundled CSS had drifted ahead of the JS.
+- Wallpaper no longer flashes black while streaming or following the chat tail.
 
 **中文 · 修复**
 - 数学公式恢复 CSS 与 JS 同版本渲染，不再出现样式超前于脚本。
+- 流式输出和自动跟随聊天底部时，静态及动态壁纸不再闪黑。
 
 ### Changed
 - About shows the git short hash when the build is not an exact release tag (#1139).
@@ -30,13 +32,6 @@ See `docs/llm-wiki/release.md`.
 - 主题编辑器改为按需加载，不再拖累应用启动。
 - 打包内的 KaTeX 数学字体只保留 woff2 格式，安装包更小。
 - 设置的读写改走阻塞线程池，异步命令不再被设置文件锁卡住。
-
-
-### Fixed
-- Wallpaper no longer flashes black while streaming or following the chat tail.
-
-**中文 · 修复**
-- 流式输出和自动跟随聊天底部时，静态及动态壁纸不再闪黑。
 
 ## [0.2.34] - 2026-09-09
 
