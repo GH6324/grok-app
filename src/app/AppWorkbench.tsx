@@ -543,19 +543,11 @@ import { resolveSidePathDeepLink } from "@/lib/sidePathDeepLink";
 import { WorkbenchAppDialogStage } from "@/app/WorkbenchAppDialogStage";
 import { WorkbenchComposerModals } from "@/app/WorkbenchComposerModals";
 import {
-  EMPTY_SESSION_FILE_CHANGES,
   mergeSessionChange,
   sessionChangesFromMessages,
   summarizeSessionChanges,
-  type SessionFileChange,
 } from "@/lib/sessionChanges";
 
-import {
-  gitDirtySummariesEqual,
-  summarizeGitDirty,
-  type GitDirtySummary,
-} from "@/lib/workspaceGit";
-import { startVisibilityPoll } from "@/lib/visibilityPoll";
 
 const AutomationsPage = lazy(async () => {
   const m = await import("@/components/AutomationsPage");
@@ -683,6 +675,9 @@ import {
   createSessionNavHost,
   useSessionNavigation,
 } from "@/hooks/useSessionNavigation";
+import { useGitDirtyStatus } from "@/hooks/useGitDirtyStatus";
+import { useSessionFileChanges } from "@/hooks/useSessionFileChanges";
+import { ERROR_BANNER_SETTINGS_ROUTE, isErrorBannerDismissOnly } from "@/lib/errorBannerActions";
 import { WorkbenchSessionTree } from "@/app/WorkbenchSessionTree";
 import { WorkbenchSidebar } from "@/app/WorkbenchSidebar";
 import { WorkbenchMain } from "@/app/WorkbenchMain";
@@ -976,15 +971,8 @@ export function AppWorkbench() {
    * Files written/edited by agent tools per session (Changes / diff panel).
    * Live tool events may enrich entries with before/after snippets.
    */
-  const [sessionChangesById, setSessionChangesById] = useState<
-    Record<string, SessionFileChange[]>
-  >({});
-  /**
-   * Workspace git dirty summary for the active project (composer chip).
-   * Null when not a repo, unavailable, clean, or no active project.
-   */
-  const [gitDirtySummary, setGitDirtySummary] =
-    useState<GitDirtySummary | null>(null);
+  const { sessionChangesById, setSessionChangesById, changesFor } =
+    useSessionFileChanges();
   const {
     getDraft,
     setDraft,
@@ -1987,6 +1975,14 @@ export function AppWorkbench() {
   } = useGitWorktreeChrome({
     hostRef: gitWorktreeHostRef,
     projectPath: activeProject?.path ?? null,
+  });
+
+  const { gitDirtySummary } = useGitDirtyStatus({
+    projectPath: activeProject?.path,
+    busy:
+      session.state === "streaming" || session.state === "awaiting_permission",
+    busyKey: session.sessionId,
+    onStatus: applyStatusBranch,
   });
   /** Host stream-stall prompt (I06); null when dismissed or not stalled. */
   const [streamStall, setStreamStall] = useState<{
@@ -8875,10 +8871,7 @@ export function AppWorkbench() {
   /** Session file-changes chip (+/− or N files); hidden when empty. */
   const sessionChangesSummary = useMemo(() => {
     const sid = session.sessionId || "";
-    const list = sid
-      ? (sessionChangesById[sid] ?? EMPTY_SESSION_FILE_CHANGES)
-      : EMPTY_SESSION_FILE_CHANGES;
-    return summarizeSessionChanges(list);
+    return summarizeSessionChanges(changesFor(sid));
   }, [session.sessionId, sessionChangesById]);
 
   // Reset find when switching conversation (keep open across same session).
@@ -9751,60 +9744,6 @@ export function AppWorkbench() {
    * Poll workspace git status for the active project so the composer dirty chip
    * stays current (hide when clean / not a repo). Soft-fail; no toast spam.
    */
-  const gitDirtyReqRef = useRef(0);
-  const refreshGitDirtyStatus = useCallback(async () => {
-    const path = activeProject?.path?.trim() || null;
-    if (!path || !api.isTauri()) {
-      gitDirtyReqRef.current += 1;
-      setGitDirtySummary((prev) => (prev == null ? prev : null));
-      return;
-    }
-    const reqId = ++gitDirtyReqRef.current;
-    try {
-      const status = await api.gitStatus(path);
-      if (reqId !== gitDirtyReqRef.current) return;
-      const next = summarizeGitDirty(status);
-      setGitDirtySummary((prev) =>
-        gitDirtySummariesEqual(prev, next) ? prev : next,
-      );
-      // Same poll already has HEAD. Patch the composer branch chip so an
-      // in-place checkout does not stay stale until the menu is clicked.
-      applyStatusBranch(path, status);
-    } catch {
-      if (reqId !== gitDirtyReqRef.current) return;
-      setGitDirtySummary((prev) => (prev == null ? prev : null));
-    }
-  }, [activeProject?.path, applyStatusBranch]);
-
-  useEffect(() => {
-    void refreshGitDirtyStatus();
-    // Soft poll while a project is bound; refresh sooner on focus.
-    // Faster while a turn is live — agent may `git switch` mid-session.
-    // Ticks pause while the window is hidden — a minimized app has nothing
-    // to paint, and `git status` is a process spawn per poll.
-    const path = activeProject?.path?.trim() || null;
-    if (!path || !api.isTauri()) return;
-    const busy =
-      session.state === "streaming" || session.state === "awaiting_permission";
-    const intervalMs = busy ? 2000 : 8000;
-    const poll = startVisibilityPoll({
-      tick: () => void refreshGitDirtyStatus(),
-      setIntervalFn: (handler) => window.setInterval(handler, intervalMs),
-    });
-    const onFocus = () => {
-      void refreshGitDirtyStatus();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      poll.dispose();
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [
-    activeProject?.path,
-    refreshGitDirtyStatus,
-    session.sessionId,
-    session.state,
-  ]);
 
   /**
    * After a project is created/updated: refresh list, expand, optionally trust
@@ -11016,43 +10955,21 @@ export function AppWorkbench() {
   const runErrorBannerAction = useCallback(
     (action: NonNullable<ErrorBannerView["primary"]>) => {
       setErrorDetailOpen(false);
-      switch (action.id) {
+      const { id } = action;
+      // Settings navigation: data-driven from the routing table.
+      const route = ERROR_BANNER_SETTINGS_ROUTE[id];
+      if (route) {
+        setLocalError(null);
+        navigateSettings(route.section, route.tab);
+        return;
+      }
+      switch (id) {
         case "reconnect":
           retryAgentConnect();
           break;
         case "open_doctor":
           setLocalError(null);
           openDoctor();
-          break;
-        case "open_runtime":
-          setLocalError(null);
-          navigateSettings("runtime");
-          break;
-        case "upgrade_cli":
-          setLocalError(null);
-          navigateSettings("runtime");
-          break;
-        case "open_network":
-          setLocalError(null);
-          navigateSettings("runtime", "network");
-          break;
-        case "open_account":
-          setLocalError(null);
-          navigateSettings("account");
-          break;
-        case "open_providers":
-          setLocalError(null);
-          // Providers live under account / extensions path — account is the
-          // login+key surface; extensions holds MCP. Prefer account for keys.
-          navigateSettings("account");
-          break;
-        case "open_permissions":
-          setLocalError(null);
-          navigateSettings("general", "permissions");
-          break;
-        case "open_extensions":
-          setLocalError(null);
-          navigateSettings("extensions");
           break;
         case "open_mcp":
           setLocalError(null);
@@ -11070,27 +10987,25 @@ export function AppWorkbench() {
           setLocalError(null);
           void addProject(false);
           break;
-        case "dismiss":
-        case "keep_waiting":
-          // keep_waiting is for the stream-stall banner (clears prompt only).
-          setLocalError(null);
-          break;
         case "cancel_turn":
           setLocalError(null);
           void stop();
           break;
         default:
+          // dismiss / keep_waiting: clear the banner (keep_waiting is the
+          // stream-stall prompt — clears the prompt, keeps the turn).
+          if (isErrorBannerDismissOnly(id)) setLocalError(null);
           break;
       }
     },
     [
       activeProject,
       addProject,
-      ensureConnected,
       navigateSettings,
       openDoctor,
       openMcpModal,
       relocateProject,
+      retryAgentConnect,
       stop,
       trustProject,
     ],
@@ -12818,10 +12733,7 @@ export function AppWorkbench() {
             retryAgentConnect={retryAgentConnect}
             runErrorBannerAction={runErrorBannerAction}
             session={session}
-            sessionChanges={
-              sessionChangesById[session.sessionId || ""] ??
-              EMPTY_SESSION_FILE_CHANGES
-            }
+            sessionChanges={changesFor(session.sessionId || "")}
             sessionJsonSchema={sessionJsonSchema}
             sessionTranscriptStore={sessionTranscriptStore}
             sessions={sessions}
@@ -13100,11 +13012,9 @@ export function AppWorkbench() {
           setSideWorkbench={setSideWorkbench}
           sideDockComposer={sideDockComposer}
           onToggleSideDockComposer={toggleDockComposer}
-          sessionChanges={
-            sessionChangesById[reviewSessionId] ??
-            sessionChangesById[session.sessionId || ""] ??
-            EMPTY_SESSION_FILE_CHANGES
-          }
+          sessionChanges={changesFor(
+            reviewSessionId ?? (session.sessionId || ""),
+          )}
           reviewFocusPath={reviewFocus?.path ?? null}
           reviewFocusToken={reviewFocus?.token ?? 0}
           reviewPinnedPaths={reviewFocus?.pinnedPaths ?? []}
