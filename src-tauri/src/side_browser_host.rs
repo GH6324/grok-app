@@ -26,9 +26,8 @@
 //!
 //! ## Google Sign-In (#1154)
 //!
-//! WebView2 hard-freezes on Google account / OAuth documents. Top-level
-//! navigations and `window.open` to those hosts are cancelled and handed to
-//! the system browser via [`crate::commands::open_http_url`].
+//! See [`crate::side_browser_google_auth`] — shared-cookie top-level login
+//! window; child WebView2 never loads Google auth documents (freeze guard).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +36,10 @@ use std::sync::mpsc;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use crate::side_browser_google_auth::{
+    handoff_google_auth_externally, should_open_google_auth_externally,
+    side_browser_data_directory, SIDE_BROWSER_DATA_STORE,
+};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder};
@@ -46,13 +49,11 @@ use tauri::{LogicalPosition, LogicalSize, Url};
 const LABEL_PREFIX: &str = "resource-browser";
 const DOWNLOAD_EVENT: &str = "side-browser://download";
 const PAGE_LOAD_EVENT: &str = "side-browser://page-load";
-const EXTERNAL_OPEN_EVENT: &str = "side-browser://external-open";
 
 /// url → staging path chosen in `Requested` (macOS finish omits path).
 static PENDING_DOWNLOADS: LazyLock<Mutex<HashMap<String, PendingDownload>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static DOWNLOAD_SEQ: AtomicU64 = AtomicU64::new(1);
-
 struct PendingDownload {
     label: String,
     staging: PathBuf,
@@ -89,86 +90,12 @@ pub struct SideBrowserPageLoadPayload {
     pub url: String,
 }
 
-/// Payload for `side-browser://external-open` (status line after Google auth handoff).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SideBrowserExternalOpenPayload {
-    pub label: String,
-    pub url: String,
-    /// `google_auth`
-    pub reason: String,
-}
-
-/// Google account / OAuth surfaces that hard-freeze WebView2 on Windows (#1154).
-///
-/// Intentionally narrow: plain `google.com` search / docs stay in-app.
-pub fn should_open_google_auth_externally(url: &Url) -> bool {
-    if url.scheme() != "https" && url.scheme() != "http" {
-        return false;
-    }
-    let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
-        return false;
-    };
-    if host == "accounts.google.com"
-        || host == "accounts.youtube.com"
-        || host == "accounts.googleusercontent.com"
-        || host.ends_with(".accounts.google.com")
-        || host == "oauth2.googleapis.com"
-    {
-        return true;
-    }
-    if host == "google.com" || host == "www.google.com" {
-        let path = url.path().to_ascii_lowercase();
-        return path.starts_with("/o/oauth2")
-            || path.starts_with("/signin")
-            || path.starts_with("/_/accountchooser")
-            || path.starts_with("/accountchooser");
-    }
-    false
-}
-
-fn emit_external_open(app: &AppHandle, label: &str, url: &str) {
-    if let Err(e) = app.emit(
-        EXTERNAL_OPEN_EVENT,
-        SideBrowserExternalOpenPayload {
-            label: label.into(),
-            url: url.into(),
-            reason: "google_auth".into(),
-        },
-    ) {
-        tracing::warn!(error = %e, "side-browser external-open emit failed");
-    }
-}
-
-fn handoff_google_auth_externally(app: &AppHandle, label: &str, url: &Url) -> bool {
-    if !should_open_google_auth_externally(url) {
-        return false;
-    }
-    let url_s = url.as_str();
-    tracing::info!(
-        target: "side_browser",
-        %label,
-        url = %url_s,
-        "Google auth URL → system browser (WebView2 freeze guard)"
-    );
-    if let Err(e) = crate::commands::open_http_url(url_s) {
-        tracing::warn!(
-            target: "side_browser",
-            error = %e,
-            url = %url_s,
-            "failed to open Google auth URL externally"
-        );
-    }
-    emit_external_open(app, label, url_s);
-    true
-}
-
 /// Emit download status for the EmbeddedBrowser status line (HTTP + blob paths).
 pub fn emit_download_payload(app: &AppHandle, payload: SideBrowserDownloadPayload) {
     emit_download(app, payload);
 }
 
-fn emit_page_load(app: &AppHandle, phase: &str, label: &str, url: &str) {
+pub(crate) fn emit_page_load(app: &AppHandle, phase: &str, label: &str, url: &str) {
     if let Err(e) = app.emit(
         PAGE_LOAD_EVENT,
         SideBrowserPageLoadPayload {
@@ -220,7 +147,7 @@ fn validate_url(url: &str) -> Result<Url, String> {
     Url::parse(u).map_err(|e| format!("bad url: {e}"))
 }
 
-fn get_side_webview<R: tauri::Runtime>(
+pub(crate) fn get_side_webview<R: tauri::Runtime>(
     app: &AppHandle<R>,
     label: &str,
 ) -> Result<tauri::Webview<R>, String> {
@@ -443,12 +370,17 @@ pub fn create(
     // users click the page when they want to type there.
     // First document load starts immediately after create.
     emit_page_load(app, "started", &label, &url);
+    let profile_dir = side_browser_data_directory();
+    std::fs::create_dir_all(&profile_dir).map_err(|e| format!("side browser profile dir: {e}"))?;
     let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed))
         .accept_first_mouse(true)
         .focused(false)
+        // Shared with the Google auth top-level window so OAuth cookies return.
+        .data_directory(profile_dir)
+        .data_store_identifier(SIDE_BROWSER_DATA_STORE)
         .initialization_script(polyfill)
-        // Google Sign-In inside WebView2 hard-freezes the Windows host (#1154).
-        // Hand those navigations to the system browser and cancel in-webview load.
+        // Google Sign-In inside child WebView2 hard-freezes Windows (#1154).
+        // Open a shared-cookie top-level window instead; cancel in-child load.
         .on_navigation(move |url| !handoff_google_auth_externally(&nav_app, &nav_label, url))
         .on_new_window(move |url, _features| {
             if handoff_google_auth_externally(&new_win_app, &new_win_label, &url) {
@@ -888,31 +820,5 @@ mod tests {
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|n| n.ends_with("hello world.pdf")));
-    }
-
-    #[test]
-    fn google_auth_hosts_open_externally() {
-        let cases = [
-            (
-                "https://accounts.google.com/o/oauth2/auth?client_id=1",
-                true,
-            ),
-            ("https://accounts.youtube.com/accounts/SetSID", true),
-            ("https://oauth2.googleapis.com/token", true),
-            ("https://www.google.com/o/oauth2/v2/auth?client_id=1", true),
-            ("https://www.google.com/signin/identifier", true),
-            ("https://www.google.com/search?q=hello", false),
-            ("https://google.com/", false),
-            ("https://mail.google.com/", false),
-            ("https://example.com/accounts.google.com", false),
-        ];
-        for (raw, expect) in cases {
-            let url = Url::parse(raw).unwrap();
-            assert_eq!(
-                should_open_google_auth_externally(&url),
-                expect,
-                "url={raw}"
-            );
-        }
     }
 }
